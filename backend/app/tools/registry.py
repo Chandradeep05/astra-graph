@@ -3,9 +3,11 @@ import inspect
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.db.falkor import FalkorDBManager
-from app.tools.models import VerifiedReviewersResponse, ChangeImpactResponse
+from app.tools.models import VerifiedReviewersResponse, ChangeImpactResponse, ImpactReviewersResponse
 from app.tools.reviewers import get_verified_reviewers
 from app.tools.impact import change_impact
+from app.tools.impact_reviewers import impact_reviewers
+
 
 
 
@@ -193,4 +195,54 @@ tool_registry.register(
         handler=_handle_change_impact,
     )
 )
+
+
+class ImpactReviewersToolInput(BaseModel):
+    """Input schema for the impact_reviewers tool."""
+    file_path: Optional[str] = Field(default=None, description="Path to target file")
+    file: Optional[str] = Field(default=None, description="Path to target file (alias)")
+    repo: str = Field(default="databases", description="Target repository name")
+    limit: int = Field(default=5, description="Maximum reviewer candidates to return")
+    max_evidence: int = Field(default=30, description="Maximum evidence commit records to return")
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_file(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        target = data.get("file_path") or data.get("file") or data.get("target_file")
+        if not target:
+            raise ValueError("Must provide 'file_path' or 'file'")
+        data["file_path"] = target
+        return data
+
+
+def _handle_impact_reviewers(
+    params: ImpactReviewersToolInput,
+    db_manager: Optional[FalkorDBManager] = None,
+) -> ImpactReviewersResponse:
+    return impact_reviewers(
+        target_file=params.file_path,
+        repo_name=params.repo,
+        limit=params.limit,
+        max_evidence=params.max_evidence,
+        db_manager=db_manager,
+    )
+
+
+# Register impact_reviewers tool
+tool_registry.register(
+    ToolDefinition(
+        name="impact_reviewers",
+        description=(
+            "Synthesizes historical co-change blast radius with author lineage to determine "
+            "ranked, evidence-backed candidate code reviewers respecting persistent graph memory."
+        ),
+        input_schema=ImpactReviewersToolInput,
+        output_schema=ImpactReviewersResponse,
+        is_read_only=True,
+        handler=_handle_impact_reviewers,
+    )
+)
+
 

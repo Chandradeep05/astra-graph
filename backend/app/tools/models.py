@@ -102,3 +102,43 @@ class ChangeImpactResponse(BaseModel):
     verification: Optional[VerificationResult] = None
     sync_info: Optional[Dict[str, Any]] = None
 
+
+class ImpactReviewerCandidate(BaseModel):
+    """
+    Evidence-backed candidate reviewer synthesized from direct target authorship
+    and historical co-change blast-radius connections.
+    """
+    person_name: str
+    person_email: str
+    direct_commits: int = 0
+    co_change_commits: int = 0
+    total_relevant_commits: int = 0
+    relevant_files: List[str] = Field(default_factory=list)
+    evidence_commits: List[str] = Field(default_factory=list)
+    signals: List[str] = Field(default_factory=list)
+    last_commit_at: str = ""
+    last_commit_sha: str = ""
+
+
+class ImpactReviewersResponse(BaseModel):
+    """
+    Deterministic response from impact_reviewers combining blast-radius
+    co-change intelligence with candidate reviewer routing and graph memory constraints.
+    """
+    refused: bool = False
+    reason_code: Optional[RefusalCode] = None
+    reason: Optional[str] = None
+    target_file: str
+    repo_name: str = "databases"
+    impacted_files_count: int = 0
+    candidates: List[ImpactReviewerCandidate] = Field(default_factory=list)
+    excluded_candidates: List[ExcludedCandidate] = Field(default_factory=list)
+    impacted_files: List[ImpactedFile] = Field(default_factory=list)
+    signals: List[str] = Field(default_factory=list)
+    claims: List[Claim] = Field(default_factory=list)
+    evidence: List[Evidence] = Field(default_factory=list)
+    memory_evidence: List[Evidence] = Field(default_factory=list)
+    verification: Optional[VerificationResult] = None
+    sync_info: Optional[Dict[str, Any]] = None
+
+

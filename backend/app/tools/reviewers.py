@@ -352,8 +352,10 @@ def get_verified_reviewers(
             LIMIT $max_ev
             """
 
-        t_res = graph.query(touch_q, {"email": cand.person_email, "target": target, "max_ev": max_evidence})
+        max_ev = max(max_evidence, cand.commit_count)
+        t_res = graph.query(touch_q, {"email": cand.person_email, "target": target, "max_ev": max_ev})
         cand_ev_ids = []
+
 
         if t_res and t_res.result_set:
             for t_row in t_res.result_set:

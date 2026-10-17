@@ -85,3 +85,56 @@ GET /api/v1/impact?file_path=backend/app/engines/assistant/engine.py
 - **Evidence Verification**: All returned claims (`co_change_count`, `last_co_change`) are strictly verified against supporting commit evidence via `EvidenceVerifier`.
 - **Kill Switch**: If FalkorDB is unreachable, the endpoint refuses safely without in-memory fallbacks.
 
+---
+
+## Milestone 9: Multi-Contributor Intelligence + Impact-to-Reviewer Reasoning
+
+### Selected Public Repository: `encode/databases`
+- **Source**: `https://github.com/encode/databases.git`
+- **Why Selected**: Manageable scale (335 commits), pure Python backend architecture, multiple active contributors with significant code overlap on core driver components (`databases/backends/postgres.py`, `databases/backends/mysql.py`, `databases/core.py`), producing genuine reviewer differentiation without artificial data.
+- **Contributor Statistics**: 62 total contributors; primary contributors:
+  - Tom Christie: 200 commits
+  - George Bogodukhov: 21 commits
+  - Amin Alaee: 21 commits
+  - Ricardo Momm: 6 commits
+  - Vadim Markovtsev: 6 commits
+
+### Impact-to-Reviewer Workflow (`impact_reviewers`)
+Anvaya connects historical blast-radius context with contributor lineage into a deterministic closed loop:
+```text
+Target File
+    ↓ (CO_CHANGES)
+Historical Co-Changing Files
+    ↓ (AUTHORED / TOUCHES)
+Relevant Contributors (Direct + Blast-Radius Commits)
+    ↓ (Constraint Memory)
+Filter Unavailable Reviewers
+    ↓ (Deterministic Ranking)
+Evidence-Backed Reviewer Candidates
+    ↓ (EvidenceVerifier)
+Verified Output
+```
+
+### Graph Relationships Used
+- `(:File)-[:CO_CHANGES {count, last_ts}]->(:File)`: Historical co-change strength between files.
+- `(:Person)-[:AUTHORED]->(:Commit)-[:TOUCHES]->(:File)`: Contributor commit touches and line churn.
+- `(:Constraint {type: 'reviewer_unavailable', active: true})`: Persistent human decision memory in FalkorDB.
+
+### Measured Example
+**Target File**: `databases/backends/postgres.py`
+- **Co-Changing Files**: `databases/backends/mysql.py` (45 shared commits), `databases/core.py` (38 shared commits), `tests/test_databases.py` (32 shared commits).
+- **Candidates (Baseline)**:
+  1. **Tom Christie**: 35 direct commits on target, 157 co-change commits across 5 related files.
+  2. **George Bogodukhov**: 6 direct commits on target, 28 co-change commits across 5 related files.
+  3. **Amin Alaee**: 4 direct commits on target, 16 co-change commits across 5 related files.
+- **Persistent Memory Effect**: When a `reviewer_unavailable` constraint is recorded for Tom Christie in FalkorDB:
+  - Tom Christie is excluded with structured constraint evidence.
+  - **George Bogodukhov** is automatically elevated to the #1 recommended reviewer across fresh sessions.
+  - If all candidates are constrained, Anvaya refuses cleanly with `NO_PATH`.
+
+### Example API Request
+```bash
+GET /api/v1/impact-reviewers?file_path=databases/backends/postgres.py&repo=databases&limit=5
+```
+
+
