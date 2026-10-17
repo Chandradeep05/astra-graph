@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from app.core.config import settings
-from app.api.routes import health
+from app.api.routes import health, ingest
 
 app = FastAPI(
     title="ANVAYA API",
@@ -11,6 +11,10 @@ app = FastAPI(
 # Register health check routes
 app.include_router(health.router)
 app.include_router(health.router, prefix="/api/v1")
+
+# Register ingestion routes
+app.include_router(ingest.router)
+app.include_router(ingest.router, prefix="/api/v1")
 
 
 @app.get("/")
