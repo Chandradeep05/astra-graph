@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
+from app.actions.models import Action
 from app.evidence.models import Claim, Evidence, RefusalCode
 from app.tools.models import ReviewerCandidate
 
@@ -23,12 +24,14 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     """
     Verified agent response conforming to Anvaya's Trust Contract.
-    Contains both machine-readable verified claims/evidence and human-readable narration.
+    Contains both machine-readable verified claims/evidence, proposed actions,
+    and human-readable narration.
     """
     question: str
     selected_tool: Optional[str] = None
     tool_arguments: Dict[str, Any] = Field(default_factory=dict)
     refused: bool = False
+    verified: bool = True
     reason_code: Optional[RefusalCode] = None
     reason: Optional[str] = None
     claims: List[Claim] = Field(default_factory=list)
@@ -37,3 +40,4 @@ class AskResponse(BaseModel):
     narration: str = ""
     sync_info: Optional[Dict[str, Any]] = None
     is_stale: bool = False
+    proposed_action: Optional[Action] = None

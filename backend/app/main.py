@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from app.core.config import settings
-from app.api.routes import health, ingest, reviewers, ask
+from app.api.routes import health, ingest, reviewers, ask, actions
 
 app = FastAPI(
     title="ANVAYA API",
@@ -23,6 +23,11 @@ app.include_router(reviewers.router, prefix="/api/v1")
 # Register agent ask routes
 app.include_router(ask.router)
 app.include_router(ask.router, prefix="/api/v1")
+
+# Register action lifecycle routes
+app.include_router(actions.router)
+app.include_router(actions.router, prefix="/api/v1")
+
 
 
 @app.get("/")
