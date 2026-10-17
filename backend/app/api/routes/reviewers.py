@@ -2,13 +2,13 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.db.falkor import FalkorDBManager, get_falkor_manager
-from app.tools.reviewers import reviewers_for
-from app.tools.models import ReviewersResponse
+from app.tools.reviewers import get_verified_reviewers
+from app.tools.models import VerifiedReviewersResponse
 
 router = APIRouter(tags=["Reviewers"])
 
 
-@router.get("/reviewers", response_model=ReviewersResponse)
+@router.get("/reviewers", response_model=VerifiedReviewersResponse)
 def get_reviewers(
     repo: str = Query("arth", description="Repository name"),
     file: Optional[str] = Query(None, description="Target file path"),
@@ -18,8 +18,10 @@ def get_reviewers(
     db_manager: FalkorDBManager = Depends(get_falkor_manager),
 ):
     """
-    Retrieves evidence-backed candidate reviewers for a file or module
-    using deterministic graph traversal over commit history.
+    Retrieves evidence-backed candidate reviewers for a file or module.
+    Enforces Anvaya's Trust Contract:
+    - Returns structured claims and evidence objects.
+    - If the target has no supporting graph path, refuses with NO_PATH before any model call.
     """
     if not file and not module:
         raise HTTPException(
@@ -33,7 +35,7 @@ def get_reviewers(
         )
 
     try:
-        response = reviewers_for(
+        response = get_verified_reviewers(
             target_file=file,
             target_module=module,
             repo_name=repo,

@@ -1,6 +1,8 @@
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
+from app.evidence.models import Claim, Evidence, RefusalCode, VerificationResult
+
 
 class ReviewerCandidate(BaseModel):
     """
@@ -28,4 +30,22 @@ class ReviewersResponse(BaseModel):
     repo_name: str
     candidates: List[ReviewerCandidate] = Field(default_factory=list)
     total_candidates: int = 0
+    sync_info: Optional[Dict[str, Any]] = None
+
+
+class VerifiedReviewersResponse(BaseModel):
+    """
+    Complete evidence-backed response from reviewers intelligence with verification
+    and refusal support.
+    """
+    refused: bool = False
+    reason_code: Optional[RefusalCode] = None
+    reason: Optional[str] = None
+    target: str
+    target_type: str
+    repo_name: str
+    candidates: List[ReviewerCandidate] = Field(default_factory=list)
+    claims: List[Claim] = Field(default_factory=list)
+    evidence: List[Evidence] = Field(default_factory=list)
+    verification: Optional[VerificationResult] = None
     sync_info: Optional[Dict[str, Any]] = None
