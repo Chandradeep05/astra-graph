@@ -36,5 +36,7 @@ class IngestSummary(BaseModel):
     person_count: int
     file_count: int
     module_count: int
+    co_changes_count: int = 0
     sync_id: str
     synced_at: str
+

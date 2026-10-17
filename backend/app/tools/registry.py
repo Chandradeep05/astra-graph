@@ -3,8 +3,10 @@ import inspect
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.db.falkor import FalkorDBManager
-from app.tools.models import VerifiedReviewersResponse
+from app.tools.models import VerifiedReviewersResponse, ChangeImpactResponse
 from app.tools.reviewers import get_verified_reviewers
+from app.tools.impact import change_impact
+
 
 
 class UnknownToolError(Exception):
@@ -126,6 +128,39 @@ class ToolRegistry:
         return str(descriptions)
 
 
+class ChangeImpactToolInput(BaseModel):
+    """Input schema for the change_impact tool."""
+    file_path: Optional[str] = Field(default=None, description="Path to target file")
+    file: Optional[str] = Field(default=None, description="Path to target file (alias)")
+    repo: str = Field(default="arth", description="Target repository name")
+    limit: int = Field(default=10, description="Maximum impacted files to return")
+    max_evidence: int = Field(default=30, description="Maximum evidence commit records to return")
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_file(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        target = data.get("file_path") or data.get("file") or data.get("target_file")
+        if not target:
+            raise ValueError("Must provide 'file_path' or 'file'")
+        data["file_path"] = target
+        return data
+
+
+def _handle_change_impact(
+    params: ChangeImpactToolInput,
+    db_manager: Optional[FalkorDBManager] = None,
+) -> ChangeImpactResponse:
+    return change_impact(
+        target_file=params.file_path,
+        repo_name=params.repo,
+        limit=params.limit,
+        max_evidence=params.max_evidence,
+        db_manager=db_manager,
+    )
+
+
 # Application-wide singleton registry
 tool_registry = ToolRegistry()
 
@@ -143,3 +178,19 @@ tool_registry.register(
         handler=_handle_reviewers_for,
     )
 )
+
+# Register change_impact blast-radius tool
+tool_registry.register(
+    ToolDefinition(
+        name="change_impact",
+        description=(
+            "Calculates deterministic, evidence-backed blast radius and historical co-change "
+            "impact for a repository file based on FalkorDB CO_CHANGES and commit history."
+        ),
+        input_schema=ChangeImpactToolInput,
+        output_schema=ChangeImpactResponse,
+        is_read_only=True,
+        handler=_handle_change_impact,
+    )
+)
+

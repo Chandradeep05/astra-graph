@@ -1,7 +1,8 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import datetime
 import uuid
 import logging
+from pydantic import BaseModel
 
 from app.db.falkor import FalkorDBManager, get_falkor_manager
 from app.ingest.models import GitCommit, IngestSummary
@@ -9,11 +10,71 @@ from app.ingest.models import GitCommit, IngestSummary
 logger = logging.getLogger(__name__)
 
 
+class CoChangePair(BaseModel):
+    """
+    Canonical representation of two files co-changing in git commit history.
+    Guarantees lexical ordering (f1 < f2) and no self-pairs (f1 != f2).
+    """
+    file1: str
+    file2: str
+    count: int
+    last_ts: str
+    f1: Optional[str] = None
+    f2: Optional[str] = None
+
+    def model_post_init(self, __context):
+        if not self.f1:
+            self.f1 = self.file1
+        if not self.f2:
+            self.f2 = self.file2
+
+    def __getitem__(self, item):
+        return getattr(self, item)
+
+
+def generate_co_change_pairs(commits: List[GitCommit]) -> List[Dict[str, Any]]:
+    """
+    Deterministically generates canonical co-change pairs from commit history:
+    - Collects files touched by each commit.
+    - Creates unordered file pairs canonically sorted (f1 < f2).
+    - Excludes self-pairs (f1 == f2).
+    - Increments count for each shared commit.
+    - Updates last_ts with the most recent commit timestamp.
+    """
+    pairs_map: Dict[tuple, Dict[str, Any]] = {}
+    for c in commits:
+        if not c.touches:
+            continue
+        # Extract unique normalized file paths touched in this commit
+        paths = sorted(list(set(t.path.replace("\\", "/").strip("/") for t in c.touches if t.path)))
+        for i in range(len(paths)):
+            for j in range(i + 1, len(paths)):
+                p1, p2 = paths[i], paths[j]
+                pair_key = (p1, p2)
+                if pair_key not in pairs_map:
+                    pairs_map[pair_key] = {
+                        "f1": p1,
+                        "f2": p2,
+                        "file1": p1,
+                        "file2": p2,
+                        "count": 1,
+                        "last_ts": c.timestamp,
+                    }
+                else:
+                    pairs_map[pair_key]["count"] += 1
+                    if c.timestamp > pairs_map[pair_key]["last_ts"]:
+                        pairs_map[pair_key]["last_ts"] = c.timestamp
+
+    return sorted(list(pairs_map.values()), key=lambda x: (x["f1"], x["f2"]))
+
+
+
 class GitGraphLoader:
     """
     Loads parsed Git commits and relationships into FalkorDB
     using batched, idempotent Cypher queries.
     """
+    generate_co_change_pairs = staticmethod(generate_co_change_pairs)
 
     def __init__(self, db_manager: Optional[FalkorDBManager] = None):
         self.db_manager = db_manager or get_falkor_manager()
@@ -127,7 +188,22 @@ class GitGraphLoader:
             chunk = all_touches[i : i + touch_batch_size]
             graph.query(touches_query, {"batch": chunk})
 
-        # 3. Create / Update Repository and Sync freshness snapshot
+        # 3. Batch load CO_CHANGES relationships
+        co_change_pairs = self.generate_co_change_pairs(commits)
+        if co_change_pairs:
+            co_changes_query = """
+            UNWIND $batch AS p
+            MATCH (f1:File {path: p.f1})
+            MATCH (f2:File {path: p.f2})
+            MERGE (f1)-[cc:CO_CHANGES]->(f2)
+            SET cc.count = p.count, cc.last_ts = p.last_ts
+            """
+            cc_batch_size = 500
+            for i in range(0, len(co_change_pairs), cc_batch_size):
+                chunk = co_change_pairs[i : i + cc_batch_size]
+                graph.query(co_changes_query, {"batch": chunk})
+
+        # 4. Create / Update Repository and Sync freshness snapshot
         repo_sync_query = """
         MERGE (r:Repository {name: $repo_name})
         ON CREATE SET r.path = $repo_path
@@ -158,11 +234,13 @@ class GitGraphLoader:
             },
         )
 
-        # 4. Read back graph totals
+        # 5. Read back graph totals
         c_count = graph.query("MATCH (c:Commit) RETURN count(c)").result_set[0][0]
         p_count = graph.query("MATCH (p:Person) RETURN count(p)").result_set[0][0]
         f_count = graph.query("MATCH (f:File) RETURN count(f)").result_set[0][0]
         m_count = graph.query("MATCH (m:Module) RETURN count(m)").result_set[0][0]
+        cc_res = graph.query("MATCH ()-[c:CO_CHANGES]->() RETURN count(c)")
+        cc_count = cc_res.result_set[0][0] if cc_res and cc_res.result_set else 0
 
         return IngestSummary(
             repo_name=repo_name,
@@ -171,6 +249,8 @@ class GitGraphLoader:
             person_count=p_count,
             file_count=f_count,
             module_count=m_count,
+            co_changes_count=cc_count,
             sync_id=sync_id,
             synced_at=synced_at,
         )
+

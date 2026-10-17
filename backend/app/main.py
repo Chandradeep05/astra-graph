@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from app.core.config import settings
-from app.api.routes import health, ingest, reviewers, ask, actions
+from app.api.routes import health, ingest, reviewers, ask, actions, impact
 
 app = FastAPI(
     title="ANVAYA API",
@@ -27,6 +27,11 @@ app.include_router(ask.router, prefix="/api/v1")
 # Register action lifecycle routes
 app.include_router(actions.router)
 app.include_router(actions.router, prefix="/api/v1")
+
+# Register blast-radius impact routes
+app.include_router(impact.router)
+app.include_router(impact.router, prefix="/api/v1")
+
 
 
 

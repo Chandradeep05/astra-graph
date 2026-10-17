@@ -16,6 +16,7 @@ FORBIDDEN_TERMS = {
     "perfect",
     "guaranteed",
     "flawless",
+    "risky",
 }
 
 CONFIDENCE_TERMS = {
@@ -115,4 +116,26 @@ class EvidenceVerifier:
             if ev_timestamps and claim.value not in ev_timestamps:
                 return f"Mismatch: Claimed recency {claim.value} not found among evidence commit timestamps"
 
+        elif claim.claim_type == "co_change_count":
+            commit_evs = [e for e in supporting_evs if e.kind == "commit"]
+            if commit_evs and len(commit_evs) != claim.value:
+                return (
+                    f"Mismatch: Claimed {claim.value} co-changes but only {len(commit_evs)} "
+                    f"supporting commit evidence records provided"
+                )
+
+        elif claim.claim_type == "shared_commit_count":
+            commit_evs = [e for e in supporting_evs if e.kind == "commit"]
+            if commit_evs and len(commit_evs) != claim.value:
+                return (
+                    f"Mismatch: Claimed {claim.value} shared commits but only {len(commit_evs)} "
+                    f"supporting commit evidence records provided"
+                )
+
+        elif claim.claim_type == "last_co_change":
+            ev_timestamps = [e.properties.get("ts") for e in supporting_evs if "ts" in e.properties]
+            if ev_timestamps and claim.value not in ev_timestamps:
+                return f"Mismatch: Claimed last co-change {claim.value} not found among evidence commit timestamps"
+
         return ""
+
