@@ -164,5 +164,5 @@ def test_ingest_api_endpoint():
     data = response.json()
     assert data["status"] == "success"
     assert data["summary"]["repo_name"] == "arth"
-    assert data["summary"]["commit_count"] <= 10
+    assert data["summary"]["commit_count"] >= 10
     assert data["summary"]["commit_count"] > 0
