@@ -2,9 +2,9 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from app.actions.models import Action
-from app.evidence.models import Claim, Evidence, RefusalCode
+from app.evidence.models import Claim, Evidence, RefusalCode, VerificationResult
 from app.memory.models import ExcludedCandidate
-from app.tools.models import ReviewerCandidate
+from app.tools.models import ReviewerCandidate, ImpactReviewerCandidate
 
 
 class ToolCall(BaseModel):
@@ -38,8 +38,19 @@ class AskResponse(BaseModel):
     claims: List[Claim] = Field(default_factory=list)
     evidence: List[Evidence] = Field(default_factory=list)
     candidates: List[ReviewerCandidate] = Field(default_factory=list)
+    impact_candidates: List[ImpactReviewerCandidate] = Field(default_factory=list)
     excluded_candidates: List[ExcludedCandidate] = Field(default_factory=list)
+    summary: str = ""
     narration: str = ""
+    impact: List[Dict[str, Any]] = Field(default_factory=list)
+    reviewers: List[Dict[str, Any]] = Field(default_factory=list)
+    verification: Optional[VerificationResult] = None
     sync_info: Optional[Dict[str, Any]] = None
     is_stale: bool = False
     proposed_action: Optional[Action] = None
+
+    @property
+    def refusal(self) -> bool:
+        """Alias for refused, conforming to conceptual schema."""
+        return self.refused
+

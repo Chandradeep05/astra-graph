@@ -26,7 +26,7 @@ class LLMProvider(ABC):
         pass
 
     @abstractmethod
-    def narrate(self, question: str, response: VerifiedReviewersResponse) -> str:
+    def narrate(self, question: str, response: Any) -> str:
         """Generates factual, verified prose from verified response claims."""
         pass
 
@@ -57,7 +57,40 @@ class TemplateProvider(LLMProvider):
                 arguments={"error": "Direct Cypher execution is strictly prohibited."},
             )
 
-        # 1. Module pattern: e.g. "Who should review the backend module?" or "module backend"
+        # Detect repo from question if databases is mentioned or path implies databases
+        detected_repo = repo
+        if re.search(r"\bdatabases\b", q, re.IGNORECASE) or "databases/" in q or "postgres" in q:
+            detected_repo = "databases"
+
+        is_impact_query = bool(re.search(r"\b(affect|impact|blast radius|break|touch|co-change|modifying|modify|changing|change)\b", q, re.IGNORECASE))
+        is_reviewer_query = bool(re.search(r"\b(review|reviewer|reviewers|who)\b", q, re.IGNORECASE))
+
+        # Check for file pattern
+        file_match = re.search(r"([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9_\-]+)", q)
+        file_name = file_match.group(1).rstrip("?.!,:;") if file_match else None
+
+        # Resolve shorthand postgres.py -> databases/backends/postgres.py if detected_repo is databases
+        if file_name and detected_repo == "databases":
+            if file_name in ("postgres.py", "backends/postgres.py"):
+                file_name = "databases/backends/postgres.py"
+
+        # Combined query: What could this affect AND who should review?
+        # Or in multi-contributor repo databases, reviewer queries leverage multi-hop impact reviewers
+        if (is_impact_query and is_reviewer_query) or (is_reviewer_query and detected_repo == "databases" and file_name):
+            if file_name:
+                return ToolCall(
+                    tool="impact_reviewers",
+                    arguments={"repo": detected_repo, "file_path": file_name},
+                )
+
+        # Pure impact query
+        if is_impact_query and not is_reviewer_query and file_name:
+            return ToolCall(
+                tool="change_impact",
+                arguments={"repo": detected_repo, "file_path": file_name},
+            )
+
+        # Module pattern: e.g. "Who should review the backend module?" or "module backend"
         module_match = re.search(r"(?:the\s+)?([a-zA-Z0-9_\-\./]+)\s+module\b", q, re.IGNORECASE)
         if not module_match:
             module_match = re.search(r"\bmodule[:\s]+([a-zA-Z0-9_\-\./]+)\b", q, re.IGNORECASE)
@@ -66,24 +99,21 @@ class TemplateProvider(LLMProvider):
             mod_name = module_match.group(1).rstrip("?.!,:;")
             return ToolCall(
                 tool="reviewers_for",
-                arguments={"repo": repo, "module": mod_name},
+                arguments={"repo": detected_repo, "module": mod_name},
             )
 
-        # 2. File pattern: e.g. "Who should review backend/app/api/v1/internal.py?" or "render.yaml"
-        file_match = re.search(r"([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9_\-]+)", q)
-        if file_match:
-            file_name = file_match.group(1).rstrip("?.!,:;")
+        # File pattern: e.g. "Who should review backend/app/api/v1/internal.py?" or "render.yaml"
+        if file_name:
             return ToolCall(
                 tool="reviewers_for",
-                arguments={"repo": repo, "file": file_name},
+                arguments={"repo": detected_repo, "file": file_name},
             )
 
-        # 3. If question is about reviewers without an identifiable file or module
-        if re.search(r"\b(review|reviewer|reviewers|who)\b", q, re.IGNORECASE):
-            # Target unspecified
+        # Target unspecified reviewer query
+        if is_reviewer_query:
             return ToolCall(
                 tool="reviewers_for",
-                arguments={"repo": repo},
+                arguments={"repo": detected_repo},
             )
 
         return ToolCall(
@@ -91,7 +121,7 @@ class TemplateProvider(LLMProvider):
             arguments={"query": q},
         )
 
-    def narrate(self, question: str, response: VerifiedReviewersResponse) -> str:
+    def narrate(self, question: str, response: Any) -> str:
         return self.narrator.narrate(question, response)
 
 
@@ -116,6 +146,8 @@ class GroqProvider(LLMProvider):
             "You are Anvaya's deterministic tool selector. You extract tool parameters.\n"
             "Registered tools:\n"
             "- reviewers_for: arguments: {\"repo\": \"...\", \"file\": \"...\"} OR {\"repo\": \"...\", \"module\": \"...\"}\n"
+            "- change_impact: arguments: {\"repo\": \"...\", \"file_path\": \"...\"}\n"
+            "- impact_reviewers: arguments: {\"repo\": \"...\", \"file_path\": \"...\"}\n"
             "You must return ONLY a JSON object: {\"tool\": \"...\", \"arguments\": {...}}.\n"
             "Never generate Cypher or SQL. If the query is unrelated, return {\"tool\": \"out_of_scope\", \"arguments\": {}}."
         )

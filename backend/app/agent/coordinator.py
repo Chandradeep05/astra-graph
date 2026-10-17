@@ -7,7 +7,12 @@ from app.agent.llm.adapter import LLMAdapter
 from app.agent.models import AskResponse, ToolCall
 from app.db.falkor import FalkorDBManager, get_falkor_manager
 from app.evidence.models import RefusalCode
-from app.tools.models import VerifiedReviewersResponse
+from app.tools.models import (
+    ChangeImpactResponse,
+    ImpactReviewersResponse,
+    ReviewerCandidate,
+    VerifiedReviewersResponse,
+)
 from app.tools.registry import (
     InvalidToolArgumentsError,
     ToolRegistry,
@@ -112,6 +117,144 @@ class AgentCoordinator:
             )
 
         # 4. Handle Result, Verified Narration, and Action Proposal
+        if isinstance(tool_result, ImpactReviewersResponse):
+            narration = self.llm_adapter.narrate(message, tool_result)
+
+            proposed_action: Optional[Action] = None
+            if not tool_result.refused and tool_result.candidates:
+                top_cand = tool_result.candidates[0]
+                cand_ev_ids = [
+                    ev.id for ev in tool_result.evidence
+                    if ev.properties.get("author") == top_cand.person_name
+                    or ev.properties.get("subject") == top_cand.person_name
+                ] or [ev.id for ev in tool_result.evidence]
+
+                cand_cl_ids = [
+                    c.claim_id for c in tool_result.claims
+                    if c.subject == top_cand.person_name
+                ] or [c.claim_id for c in tool_result.claims]
+
+                try:
+                    action_payload = ActionCreate(
+                        type=ActionType.REQUEST_REVIEW,
+                        repo=tool_result.repo_name,
+                        target=tool_result.target_file,
+                        reviewer=top_cand.person_name,
+                        reviewer_email=top_cand.person_email,
+                        reason=f"Candidate '{top_cand.person_name}' has {top_cand.direct_commits} direct commits and {top_cand.co_change_commits} co-change commits touching '{tool_result.target_file}' and related blast-radius files.",
+                        evidence_ids=cand_ev_ids,
+                        claim_ids=cand_cl_ids,
+                        arguments={
+                            "reviewer": top_cand.person_name,
+                            "reviewer_email": top_cand.person_email,
+                            "target": tool_result.target_file,
+                            "repo": tool_result.repo_name,
+                            "direct_commits": top_cand.direct_commits,
+                            "co_change_commits": top_cand.co_change_commits,
+                            "relevant_files": top_cand.relevant_files,
+                        },
+                    )
+                    proposed_action = self.action_service.create_action(action_payload)
+                except Exception as exc:
+                    logger.warning("Failed to propose action: %s", exc)
+                    proposed_action = None
+
+            compat_candidates = [
+                ReviewerCandidate(
+                    person_name=c.person_name,
+                    person_email=c.person_email,
+                    commit_count=c.total_relevant_commits,
+                    lines_added=0,
+                    lines_deleted=0,
+                    last_commit_at=c.last_commit_at,
+                    last_commit_sha=c.last_commit_sha,
+                    target=tool_result.target_file,
+                    target_type="file",
+                    evidence_commits=c.evidence_commits,
+                )
+                for c in tool_result.candidates
+            ]
+
+            impact_list = [
+                {
+                    "file": f.path,
+                    "co_change_count": f.co_change_count,
+                    "shared_commit_count": f.shared_commit_count,
+                    "last_co_change": f.last_co_change,
+                }
+                for f in tool_result.impacted_files
+            ]
+
+            reviewers_list = [
+                {
+                    "person": c.person_name,
+                    "email": c.person_email,
+                    "direct_commits": c.direct_commits,
+                    "co_change_commits": c.co_change_commits,
+                    "total_commits": c.total_relevant_commits,
+                    "relevant_files": c.relevant_files,
+                    "signals": c.signals,
+                }
+                for c in tool_result.candidates
+            ]
+
+            is_verified = (
+                not tool_result.refused
+                and (tool_result.verification.verified if tool_result.verification else False)
+            )
+
+            return AskResponse(
+                question=message,
+                selected_tool=tool_call.tool,
+                tool_arguments=tool_call.arguments,
+                refused=tool_result.refused,
+                verified=is_verified,
+                reason_code=tool_result.reason_code,
+                reason=tool_result.reason,
+                claims=tool_result.claims,
+                evidence=tool_result.evidence,
+                candidates=compat_candidates,
+                impact_candidates=tool_result.candidates,
+                excluded_candidates=tool_result.excluded_candidates,
+                summary=narration,
+                narration=narration,
+                impact=impact_list,
+                reviewers=reviewers_list,
+                verification=tool_result.verification,
+                sync_info=tool_result.sync_info,
+                is_stale=(tool_result.reason_code == RefusalCode.STALE_DATA),
+                proposed_action=proposed_action,
+            )
+
+        if isinstance(tool_result, ChangeImpactResponse):
+            narration = self.llm_adapter.narrate(message, tool_result)
+            impact_list = [
+                {
+                    "file": f.path,
+                    "co_change_count": f.co_change_count,
+                    "shared_commit_count": f.shared_commit_count,
+                    "last_co_change": f.last_co_change,
+                }
+                for f in tool_result.impacted_files
+            ]
+            return AskResponse(
+                question=message,
+                selected_tool=tool_call.tool,
+                tool_arguments=tool_call.arguments,
+                refused=tool_result.refused,
+                verified=not tool_result.refused,
+                reason_code=tool_result.reason_code,
+                reason=tool_result.reason,
+                claims=tool_result.claims,
+                evidence=tool_result.evidence,
+                summary=narration,
+                narration=narration,
+                impact=impact_list,
+                verification=tool_result.verification,
+                sync_info=tool_result.sync_info,
+                proposed_action=None,
+            )
+
         if isinstance(tool_result, VerifiedReviewersResponse):
             narration = self.llm_adapter.narrate(message, tool_result)
 
@@ -153,6 +296,17 @@ class AgentCoordinator:
                     logger.warning("Failed to propose action: %s", exc)
                     proposed_action = None
 
+            reviewers_list = [
+                {
+                    "person": c.person_name,
+                    "email": c.person_email,
+                    "commits": c.commit_count,
+                    "lines_added": c.lines_added,
+                    "lines_deleted": c.lines_deleted,
+                }
+                for c in tool_result.candidates
+            ]
+
             return AskResponse(
                 question=message,
                 selected_tool=tool_call.tool,
@@ -165,7 +319,10 @@ class AgentCoordinator:
                 evidence=tool_result.evidence,
                 candidates=tool_result.candidates,
                 excluded_candidates=tool_result.excluded_candidates,
+                summary=narration,
                 narration=narration,
+                reviewers=reviewers_list,
+                verification=tool_result.verification,
                 sync_info=tool_result.sync_info,
                 is_stale=(tool_result.reason_code == RefusalCode.STALE_DATA),
                 proposed_action=proposed_action,

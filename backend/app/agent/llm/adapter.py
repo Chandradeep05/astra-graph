@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from app.agent.llm.provider import (
     GeminiProvider,
@@ -77,7 +77,7 @@ class LLMAdapter:
         logger.info("Using ultimate deterministic TemplateProvider for tool selection.")
         return TemplateProvider().select_tool(question, repo=repo)
 
-    def narrate(self, question: str, response: VerifiedReviewersResponse) -> str:
+    def narrate(self, question: str, response: Any) -> str:
         """
         Generates prose narration with verifier safety filtering.
         """

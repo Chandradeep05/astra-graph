@@ -137,4 +137,67 @@ Verified Output
 GET /api/v1/impact-reviewers?file_path=databases/backends/postgres.py&repo=databases&limit=5
 ```
 
+---
+
+## Agent Workflow
+
+```text
+User request
+   ↓
+Graph tool selection
+   ↓
+Change impact
+   ↓
+Reviewer intelligence
+   ↓
+Evidence verification
+   ↓
+Human approval
+   ↓
+Action
+   ↓
+Graph outcome
+   ↓
+Persistent memory
+```
+
+### Architectural Separation of Concerns
+- **What the LLM does**: Interprets natural language questions (e.g. extracts file paths and target repos) and generates strictly factual prose narrations from verified claims. The LLM is **never** permitted to generate Cypher, access FalkorDB directly, or invent facts, confidence scores, or rankings.
+- **What FalkorDB does**: Serves as the operational single source of truth. FalkorDB executes graph traversals (`TOUCHES`, `AUTHORED`, `CO_CHANGES`, `APPLIES_TO`, `RESULTED_IN`), persists human constraints (`:Constraint`), records proposed actions (`:Action`), and persists execution outcomes (`:Outcome`).
+- **What deterministic application code does**: Manages tool registration and input validation (`ToolRegistry`), executes parameterized Cypher queries, calculates deterministic candidate rankings, evaluates refusal conditions (`NO_PATH`, `OUT_OF_SCOPE`), enforces the human approval state machine (`ActionStatus`), and verifies evidence grounding (`EvidenceVerifier`).
+- **Where human approval is required**: Actions (`request_review`) are proposed in `PROPOSED` state. Execution is strictly forbidden until an explicit human approval is received (`approve_action`). If the user rejects the proposal with a reason, structured memory records the constraint into FalkorDB, updating future decisions.
+
+### Real Example: `encode/databases`
+**User Request**:
+> "I'm going to modify databases/backends/postgres.py. What could this affect, who should review it, and why?"
+
+1. **Tool Selection**: Deterministic routing selects `impact_reviewers` with `file_path="databases/backends/postgres.py"` and `repo="databases"`.
+2. **Multi-Hop Traversal**: FalkorDB traverses `(f:File {path: 'databases/backends/postgres.py'})-[:CO_CHANGES]-(other:File)` and author lineages `(p:Person)-[:AUTHORED]->(:Commit)-[:TOUCHES]->(f:File)`.
+3. **Change Impact**: Identifies co-changing files (`databases/backends/mysql.py` [45 co-changes], `databases/core.py` [38 co-changes], `tests/test_databases.py` [32 co-changes]).
+4. **Reviewer Selection**: Ranks candidate reviewers (Tom Christie: 35 direct commits, 157 co-change commits; George Bogodukhov: 6 direct commits, 28 co-change commits).
+5. **Evidence Verification**: Verifies 100% of claims against graph commit evidence.
+6. **Action Proposal**: Creates `request_review` action for Tom Christie with status `PROPOSED`.
+7. **Human Approval**: User approves action -> Sandbox executor records execution outcome -> Graph links `(:Action)-[:RESULTED_IN]->(:Outcome)`.
+8. **Persistent Memory**: If the reviewer is rejected as unavailable, FalkorDB stores `(:Constraint {type: 'reviewer_unavailable', subject: 'Tom Christie', scope: 'repo:databases'})`. In a fresh session without in-process state, George Bogodukhov is recommended instead.
+
+---
+
+## Track Alignment
+
+### Track 01 — Agents That Act on Connected Data
+Anvaya directly embodies Track 01:
+- **Multi-Hop Graph Reasoning**: Answers require traversing multiple graph relationship hops: `File -> CO_CHANGES -> Related File -> TOUCHES -> Commit -> AUTHORED -> Person`.
+- **Graph Queries as Agent Tools**: Application-owned tools (`reviewers_for`, `change_impact`, `impact_reviewers`) wrap parameterized Cypher queries with Pydantic validation contracts.
+- **Explainable Evidence**: Every claim presented to the user is grounded in concrete evidence objects (`Evidence`) referencing commit SHAs, line churn, and timestamps.
+- **Human-Approved Action**: The agent investigates and recommends, but requires human approval before execution (`PROPOSED` -> `APPROVED` -> `EXECUTING`).
+- **Action Outcome Written Back to Graph**: Executed actions create `(:Outcome)` nodes linked directly to `(:Action)` in FalkorDB, providing complete provenance.
+
+### Track 02 — Agent Memory and Coordination
+Anvaya reinforces Track 02 through persistent engineering memory:
+- **Persistent Graph Memory**: Human decisions and organizational constraints are persisted as `(:Constraint)` nodes in FalkorDB.
+- **State Surviving Process Restart**: Constraints survive application restarts and fresh agent coordinator instantiation without in-memory caches.
+- **Reviewer Availability Constraint**: Rejection of a reviewer creates a scoped constraint (`reviewer_unavailable` on `repo:databases`).
+- **Changed Future Decision**: When the same question is asked in a fresh session, Anvaya excludes the unavailable contributor and deterministically selects the next evidence-supported reviewer.
+
+
 
