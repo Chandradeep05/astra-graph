@@ -37,9 +37,13 @@ class ActionService:
         self,
         db_manager: Optional[FalkorDBManager] = None,
         executor: Optional[ActionExecutor] = None,
+        memory_service: Optional[Any] = None,
+        graph_name: Optional[str] = None,
     ) -> None:
         self.db_manager = db_manager or get_falkor_manager()
         self.executor = executor or SandboxActionExecutor()
+        self.memory_service = memory_service
+        self.graph_name = graph_name
         self._actions: Dict[str, Action] = {}
 
     def create_action(self, payload: ActionCreate) -> Action:
@@ -130,10 +134,17 @@ class ActionService:
         logger.info("Action approved: id=%s", action_id)
         return action
 
-    def reject_action(self, action_id: str, reason: Optional[str] = None) -> Action:
+    def reject_action(
+        self,
+        action_id: str,
+        reason: Optional[str] = None,
+        constraint: Optional[Any] = None,
+    ) -> Action:
         """
         Transitions PROPOSED -> REJECTED.
         Rejected actions can NEVER be executed.
+        If a structured constraint is provided, persists it into FalkorDB graph memory
+        linked to this action: (:Action)-[:RESULTED_IN]->(:Constraint).
         """
         action = self.get_action(action_id)
 
@@ -149,10 +160,39 @@ class ActionService:
         if reason:
             action.error_message = f"Rejected by user: {reason}"
 
+        # If a structured constraint was submitted, persist to graph memory
+        if constraint:
+            from app.memory.models import ConstraintCreate, ConstraintType
+            from app.memory.service import MemoryService, get_memory_service
+
+            if isinstance(constraint, dict):
+                c_payload = ConstraintCreate(
+                    type=constraint.get("type", ConstraintType.REVIEWER_UNAVAILABLE),
+                    subject=constraint.get("subject") or action.reviewer or action.arguments.get("reviewer", ""),
+                    scope=constraint.get("scope") or f"repo:{action.repo}",
+                    source_action_id=action.id,
+                )
+            elif isinstance(constraint, ConstraintCreate):
+                c_payload = constraint
+                c_payload.source_action_id = action.id
+                if not c_payload.subject:
+                    c_payload.subject = action.reviewer or action.arguments.get("reviewer", "")
+                if not c_payload.scope:
+                    c_payload.scope = f"repo:{action.repo}"
+            else:
+                c_payload = None
+
+            if c_payload:
+                mem_svc = self.memory_service or MemoryService(
+                    db_manager=self.db_manager,
+                    graph_name=self.graph_name,
+                )
+                mem_svc.create_constraint(c_payload)
+
         self._actions[action_id] = action
         self._update_action_status_in_graph(action)
 
-        logger.info("Action rejected: id=%s", action_id)
+        logger.info("Action rejected: id=%s (has_constraint=%s)", action_id, bool(constraint))
         return action
 
     def execute_action(self, action_id: str) -> Action:
@@ -233,7 +273,7 @@ class ActionService:
     def _write_action_to_graph(self, action: Action) -> None:
         """Writes Action node and provenance links to FalkorDB."""
         try:
-            graph = self.db_manager.get_graph()
+            graph = self.db_manager.get_graph(self.graph_name)
 
             # 1. Action Node
             create_query = """
@@ -302,7 +342,7 @@ class ActionService:
     def _update_action_status_in_graph(self, action: Action) -> None:
         """Updates status and timestamp on the Action node in FalkorDB."""
         try:
-            graph = self.db_manager.get_graph()
+            graph = self.db_manager.get_graph(self.graph_name)
             query = """
             MATCH (a:Action {id: $id})
             SET a.status = $status,
@@ -326,7 +366,7 @@ class ActionService:
     def _write_outcome_to_graph(self, action: Action, outcome: Outcome) -> None:
         """Writes Outcome node and (:Action)-[:RESULTED_IN]->(:Outcome) link."""
         try:
-            graph = self.db_manager.get_graph()
+            graph = self.db_manager.get_graph(self.graph_name)
             query = """
             MATCH (a:Action {id: $action_id})
             SET a.status = $status,
@@ -359,7 +399,7 @@ class ActionService:
     def _read_action_from_graph(self, action_id: str) -> Optional[Action]:
         """Reads Action node from FalkorDB."""
         try:
-            graph = self.db_manager.get_graph()
+            graph = self.db_manager.get_graph(self.graph_name)
             query = """
             MATCH (a:Action {id: $id})
             OPTIONAL MATCH (a)-[:BASED_ON]->(e:Evidence)

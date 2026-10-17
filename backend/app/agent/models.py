@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 
 from app.actions.models import Action
 from app.evidence.models import Claim, Evidence, RefusalCode
+from app.memory.models import ExcludedCandidate
 from app.tools.models import ReviewerCandidate
 
 
@@ -37,6 +38,7 @@ class AskResponse(BaseModel):
     claims: List[Claim] = Field(default_factory=list)
     evidence: List[Evidence] = Field(default_factory=list)
     candidates: List[ReviewerCandidate] = Field(default_factory=list)
+    excluded_candidates: List[ExcludedCandidate] = Field(default_factory=list)
     narration: str = ""
     sync_info: Optional[Dict[str, Any]] = None
     is_stale: bool = False

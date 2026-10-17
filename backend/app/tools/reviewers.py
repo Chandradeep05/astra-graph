@@ -8,6 +8,7 @@ from app.tools.models import (
     ReviewersResponse,
     VerifiedReviewersResponse,
 )
+from app.memory.models import ExcludedCandidate
 from app.evidence.models import (
     Claim,
     Evidence,
@@ -251,11 +252,90 @@ def get_verified_reviewers(
             sync_info=base_response.sync_info or sync_info,
         )
 
-    # 4. Build structured Evidence objects from graph facts
+    # 4. Check active persistent memory constraints in FalkorDB
+    excluded_candidates: List[ExcludedCandidate] = []
+    memory_evidence: List[Evidence] = []
+    active_constraints: Dict[str, Dict[str, Any]] = {}
+
+    try:
+        mem_query = """
+        MATCH (c:Constraint {active: true, type: 'reviewer_unavailable'})
+        WHERE c.scope = $scope OR c.scope = $raw_scope
+        RETURN c.id, c.subject, c.scope, c.source_action_id
+        """
+        mem_res = graph.query(
+            mem_query,
+            {"scope": f"repo:{repo_name}", "raw_scope": repo_name},
+        )
+        if mem_res and mem_res.result_set:
+            for m_row in mem_res.result_set:
+                c_id = str(m_row[0])
+                c_subj = str(m_row[1])
+                c_scope = str(m_row[2])
+                c_action_id = str(m_row[3]) if m_row[3] else ""
+                active_constraints[c_subj] = {
+                    "id": c_id,
+                    "subject": c_subj,
+                    "scope": c_scope,
+                    "source_action_id": c_action_id,
+                }
+    except Exception as exc:
+        logger.debug("Memory constraints read note: %s", exc)
+
+    # Filter candidates based on active constraints
+    filtered_candidates: List[ReviewerCandidate] = []
+    for cand in base_response.candidates:
+        matched_c = active_constraints.get(cand.person_name) or active_constraints.get(cand.person_email)
+        if matched_c:
+            ev_id = f"ev_constraint_{matched_c['id']}"
+            ev_obj = Evidence(
+                id=ev_id,
+                kind="constraint",
+                ref=matched_c["id"],
+                properties={
+                    "type": "reviewer_unavailable",
+                    "subject": cand.person_name,
+                    "scope": matched_c["scope"],
+                    "source_action_id": matched_c["source_action_id"],
+                },
+            )
+            memory_evidence.append(ev_obj)
+            excluded_candidates.append(
+                ExcludedCandidate(
+                    person=cand.person_name,
+                    reason="reviewer_unavailable",
+                    evidence_ids=[ev_id],
+                    constraint_id=matched_c["id"],
+                )
+            )
+        else:
+            filtered_candidates.append(cand)
+
+    # If all candidate reviewers were excluded by active constraints -> Refuse rather than invent
+    if not filtered_candidates:
+        excluded_names = ", ".join(e.person for e in excluded_candidates)
+        return VerifiedReviewersResponse(
+            refused=True,
+            reason_code=RefusalCode.NO_PATH,
+            reason=(
+                f"Candidate reviewer(s) [{excluded_names}] excluded due to active graph constraints "
+                f"for '{repo_name}'. No other eligible reviewer found in graph history."
+            ),
+            target=target,
+            target_type=target_type,
+            repo_name=repo_name,
+            candidates=[],
+            excluded_candidates=excluded_candidates,
+            evidence=memory_evidence,
+            memory_evidence=memory_evidence,
+            sync_info=base_response.sync_info or sync_info,
+        )
+
+    # 5. Build structured Evidence objects from graph facts for eligible candidates
     evidence_list: List[Evidence] = []
     claims_list: List[Claim] = []
 
-    for idx, cand in enumerate(base_response.candidates):
+    for idx, cand in enumerate(filtered_candidates):
         # Query individual commit touch details for this candidate to construct granular evidence
         if target_type == "file":
             touch_q = """
@@ -363,9 +443,11 @@ def get_verified_reviewers(
         target=target,
         target_type=target_type,
         repo_name=repo_name,
-        candidates=base_response.candidates,
+        candidates=filtered_candidates,
+        excluded_candidates=excluded_candidates,
         claims=claims_list,
-        evidence=evidence_list,
+        evidence=evidence_list + memory_evidence,
+        memory_evidence=memory_evidence,
         verification=verification,
         sync_info=base_response.sync_info or sync_info,
     )

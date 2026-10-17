@@ -11,12 +11,14 @@ from app.actions.models import (
     InvalidStateTransitionError,
 )
 from app.actions.service import ActionService, get_action_service
+from app.memory.models import ConstraintCreate
 
 router = APIRouter(prefix="/actions", tags=["Actions"])
 
 
 class RejectRequest(BaseModel):
     reason: Optional[str] = None
+    constraint: Optional[ConstraintCreate] = None
 
 
 @router.post("", response_model=Action, status_code=status.HTTP_201_CREATED)
@@ -94,7 +96,8 @@ def reject_action(
     """
     try:
         reason = payload.reason if payload else None
-        return service.reject_action(action_id, reason=reason)
+        constraint = payload.constraint if payload else None
+        return service.reject_action(action_id, reason=reason, constraint=constraint)
     except ActionNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

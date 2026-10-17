@@ -41,6 +41,10 @@ class TemplateNarrator:
                 f"{cand.lines_deleted} lines deleted{recency_str}."
             )
 
+        if response.excluded_candidates:
+            excluded_names = ", ".join(e.person for e in response.excluded_candidates)
+            lines.append(f"\nExcluded by active graph memory constraint: {excluded_names}.")
+
         if response.sync_info and "synced_at" in response.sync_info:
             lines.append(f"\nGraph snapshot timestamp: {response.sync_info['synced_at']}.")
 

@@ -164,6 +164,7 @@ class AgentCoordinator:
                 claims=tool_result.claims,
                 evidence=tool_result.evidence,
                 candidates=tool_result.candidates,
+                excluded_candidates=tool_result.excluded_candidates,
                 narration=narration,
                 sync_info=tool_result.sync_info,
                 is_stale=(tool_result.reason_code == RefusalCode.STALE_DATA),
