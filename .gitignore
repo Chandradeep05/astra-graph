@@ -1,0 +1,22 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments
+.env
+.env.local
+
+# FalkorDB data (if persisted)
+data/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
