@@ -182,6 +182,87 @@ Persistent memory
 
 ---
 
+## Evidence-Backed Context Packages
+
+> **Disclaimer**: *A Context Package is not a replacement for source code. It is a bounded relational context layer designed to reduce the amount of repository context an agent must reconstruct from scratch.*
+
+Rather than dumping entire repositories into an LLM context window, Anvaya queries FalkorDB to synthesize a bounded, machine-readable **Context Package** (`ContextPackage`) representing the structural, historical, and organizational reality of a repository or target subject.
+
+```text
+Natural Language Query / API Request
+                ↓
+    FalkorDB Traversal & Clamping
+(Modules, File Churn, Blast Radius, Constraints)
+                ↓
+      Evidence Construction
+(Commit SHAs, Line Churn, Co-Changes, Timestamps)
+                ↓
+     EvidenceVerifier Check
+ (100% Deterministic Grounding)
+                ↓
+ Structured ContextPackage + Narration
+```
+
+### Context Scopes
+
+1. **Repository Context** (`subject_type: repository`):
+   - Structural architecture derived from directory trees and co-change clusters (`backend`, `frontend`, `alembic`, `scripts`).
+   - Top churn files by commit count and line additions/deletions.
+   - Core historical contributors with line churn and last-active timestamps.
+   - Cross-module dependency coupling and co-change bridges.
+   - Active organizational constraints recorded in persistent graph memory.
+
+2. **File Context** (`subject_type: file`):
+   - Module membership and lineage.
+   - Historical author lineage with direct commit counts and churn.
+   - Blast-radius co-changing files (`CO_CHANGES`) across related modules.
+   - Evidence-backed recommended reviewers with constraint exclusion filtering.
+
+3. **Module Context** (`subject_type: module`):
+   - Subsystem files, internal commit churn, and module-specific top contributors.
+
+### Strict Trust Contract & Evidence Grounding
+
+- **Application-Level Verification**: All factual claims in a `ContextPackage` are verified against attached `Evidence` objects via `EvidenceVerifier`.
+- **Zero Hallucination**: No speculative confidence scores (e.g. "95% confidence") or subjective assertions ("expert reviewer") are permitted.
+- **Fail-Closed Kill Switch**: If FalkorDB is unreachable, Anvaya fails closed with `refusal=True`, `reason_code=RefusalCode.NO_PATH`, and an explicit limitation note. It never falls back to an ungrounded LLM or unverified cache.
+- **Explicit Bounds & Truncation Reporting**: Traversal depth is clamped to `[1, 5]`. If the graph contains more files or contributors than requested limits, `truncated=True` is set with detailed `truncation_reason`.
+
+### Measured Examples
+
+#### 1. Repository Context: `ARTH`
+```bash
+curl -X POST http://localhost:8000/api/v1/context \
+  -H "Content-Type: application/json" \
+  -d '{"repository": "arth", "depth": 3, "max_files": 10}'
+```
+- **Modules**: `backend` (104 files), `frontend` (82 files), `alembic` (3 files), `.` (12 files), `docs` (7 files), `.github` (5 files).
+- **Freshness Snapshot**: Linked to `(:Sync)` snapshot `79595add24`, commit count `10`.
+- **Top Contributor**: `chandradeep05` (97 commits, 21,957 lines added).
+- **Verification**: `verified=True`, 5 verified claims, 0 rejected claims.
+
+#### 2. File Context: `backend/app/engines/assistant/engine.py` (ARTH)
+```bash
+curl -X POST http://localhost:8000/api/v1/context \
+  -H "Content-Type: application/json" \
+  -d '{"repository": "arth", "subject": "backend/app/engines/assistant/engine.py"}'
+```
+- **Primary Author**: `chandradeep05` (21 commits touching file).
+- **Blast Radius**: 19 co-changing files across `backend` and `.` modules.
+- **Recommended Reviewer**: `chandradeep05` (unconstrained).
+
+#### 3. Multi-Contributor File Context with Memory Constraints: `databases/backends/postgres.py` (Databases)
+```bash
+curl -X POST http://localhost:8000/api/v1/context \
+  -H "Content-Type: application/json" \
+  -d '{"repository": "databases", "subject": "databases/backends/postgres.py"}'
+```
+- **Primary Author**: Tom Christie (35 direct commits).
+- **Blast Radius**: `databases/backends/mysql.py` (45 co-changes), `databases/core.py` (38 co-changes).
+- **Persistent Constraint Effect**: When `Tom Christie` is marked `reviewer_unavailable` in FalkorDB, `is_constrained=True` is recorded in `ContributorContext`, Tom Christie is moved to `excluded_reviewers`, and `George Bogodukhov` is elevated to recommended reviewer.
+
+---
+
 ## Track Alignment
 
 ### Track 01 — Agents That Act on Connected Data

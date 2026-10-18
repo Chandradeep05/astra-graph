@@ -6,6 +6,7 @@ from app.tools.models import (
     ImpactReviewersResponse,
     VerifiedReviewersResponse,
 )
+from app.context.models import ContextPackage
 from app.evidence.models import RefusalCode
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ class TemplateNarrator:
     """
 
     def narrate(self, question: str, response: Any) -> str:
-        if getattr(response, "refused", False):
+        if getattr(response, "refused", False) or getattr(response, "refusal", False):
             reason_code = getattr(response, "reason_code", None)
             code_str = (
                 reason_code.value
@@ -28,6 +29,28 @@ class TemplateNarrator:
                 else str(reason_code)
             )
             return f"[Refusal: {code_str}] {getattr(response, 'reason', '')}"
+
+        if isinstance(response, ContextPackage):
+            subj_val = response.subject_type.value if hasattr(response.subject_type, "value") else str(response.subject_type)
+            lines = [
+                f"Evidence-Backed Context Package for {subj_val} '{response.subject}' (repository: '{response.repository}'):"
+            ]
+            if response.summary:
+                lines.append(f"\n{response.summary}")
+            if response.modules:
+                lines.append(f"\nModules ({len(response.modules)}): {', '.join(m.name for m in response.modules)}")
+            if response.important_files:
+                lines.append(f"\nTracked files ({len(response.important_files)}):")
+                for f in response.important_files[:5]:
+                    lines.append(f"- {f.path} ({f.commit_count} commits)")
+            if response.contributors:
+                lines.append(f"\nKey contributors ({len(response.contributors)}):")
+                for c in response.contributors[:3]:
+                    lines.append(f"- {c.name} ({c.commit_count} commits)")
+            if response.freshness and response.freshness.synced_at:
+                head_str = response.freshness.head_sha[:8] if response.freshness.head_sha else "unknown"
+                lines.append(f"\nGraph freshness snapshot: {response.freshness.synced_at} (head: {head_str})")
+            return "\n".join(lines)
 
         if isinstance(response, ImpactReviewersResponse):
             lines = [

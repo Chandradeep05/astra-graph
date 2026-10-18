@@ -7,6 +7,8 @@ from app.tools.models import VerifiedReviewersResponse, ChangeImpactResponse, Im
 from app.tools.reviewers import get_verified_reviewers
 from app.tools.impact import change_impact
 from app.tools.impact_reviewers import impact_reviewers
+from app.context.models import ContextPackage
+from app.context.service import ContextPackageService
 
 
 
@@ -244,5 +246,49 @@ tool_registry.register(
         handler=_handle_impact_reviewers,
     )
 )
+
+
+class ContextPackageToolInput(BaseModel):
+    """Input schema for the context_package tool."""
+    repository: str = Field(default="arth", description="Target repository name")
+    subject: Optional[str] = Field(default=None, description="Optional target file or module path")
+    subject_type: Optional[str] = Field(default=None, description="Type of subject: 'repository', 'file', or 'module'")
+    depth: int = Field(default=3, description="Graph traversal depth (1-5)")
+    max_files: int = Field(default=20, description="Max files to include in context")
+    max_contributors: int = Field(default=10, description="Max contributors to include in context")
+    max_evidence: int = Field(default=30, description="Max evidence records to attach")
+
+
+def _handle_context_package(
+    params: ContextPackageToolInput,
+    db_manager: Optional[FalkorDBManager] = None,
+) -> ContextPackage:
+    service = ContextPackageService(db_manager=db_manager)
+    return service.get_context_package(
+        repository=params.repository,
+        subject=params.subject,
+        subject_type=params.subject_type,
+        depth=params.depth,
+        max_files=params.max_files,
+        max_contributors=params.max_contributors,
+        max_evidence=params.max_evidence,
+    )
+
+
+# Register context_package tool
+tool_registry.register(
+    ToolDefinition(
+        name="context_package",
+        description=(
+            "Generates a bounded, evidence-backed repository, file, or module Context Package "
+            "derived exclusively from FalkorDB knowledge graph relationships."
+        ),
+        input_schema=ContextPackageToolInput,
+        output_schema=ContextPackage,
+        is_read_only=True,
+        handler=_handle_context_package,
+    )
+)
+
 
 

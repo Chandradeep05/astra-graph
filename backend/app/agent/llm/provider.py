@@ -64,6 +64,7 @@ class TemplateProvider(LLMProvider):
 
         is_impact_query = bool(re.search(r"\b(affect|impact|blast radius|break|touch|co-change|modifying|modify|changing|change)\b", q, re.IGNORECASE))
         is_reviewer_query = bool(re.search(r"\b(review|reviewer|reviewers|who)\b", q, re.IGNORECASE))
+        is_context_query = bool(re.search(r"\b(context|understand|context package|overview|architecture|system context)\b", q, re.IGNORECASE))
 
         # Check for file pattern
         file_match = re.search(r"([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9_\-]+)", q)
@@ -73,6 +74,32 @@ class TemplateProvider(LLMProvider):
         if file_name and detected_repo == "databases":
             if file_name in ("postgres.py", "backends/postgres.py"):
                 file_name = "databases/backends/postgres.py"
+
+        # Context package query
+        if is_context_query and not (is_reviewer_query and not re.search(r"\bcontext\b", q, re.IGNORECASE)):
+            if file_name:
+                return ToolCall(
+                    tool="context_package",
+                    arguments={"repository": detected_repo, "subject": file_name, "subject_type": "file"},
+                )
+            module_match = re.search(r"(?:the\s+)?([a-zA-Z0-9_\-\./]+)\s+module\b", q, re.IGNORECASE)
+            if not module_match:
+                module_match = re.search(r"\bmodule[:\s]+([a-zA-Z0-9_\-\./]+)\b", q, re.IGNORECASE)
+            if module_match:
+                mod_name = module_match.group(1).rstrip("?.!,:;")
+                return ToolCall(
+                    tool="context_package",
+                    arguments={"repository": detected_repo, "subject": mod_name, "subject_type": "module"},
+                )
+            target_repo = detected_repo
+            if re.search(r"\barth\b", q, re.IGNORECASE):
+                target_repo = "arth"
+            elif re.search(r"\bdatabases\b", q, re.IGNORECASE):
+                target_repo = "databases"
+            return ToolCall(
+                tool="context_package",
+                arguments={"repository": target_repo, "subject": target_repo, "subject_type": "repository"},
+            )
 
         # Combined query: What could this affect AND who should review?
         # Or in multi-contributor repo databases, reviewer queries leverage multi-hop impact reviewers
@@ -148,6 +175,7 @@ class GroqProvider(LLMProvider):
             "- reviewers_for: arguments: {\"repo\": \"...\", \"file\": \"...\"} OR {\"repo\": \"...\", \"module\": \"...\"}\n"
             "- change_impact: arguments: {\"repo\": \"...\", \"file_path\": \"...\"}\n"
             "- impact_reviewers: arguments: {\"repo\": \"...\", \"file_path\": \"...\"}\n"
+            "- context_package: arguments: {\"repository\": \"...\", \"subject\": \"...\", \"subject_type\": \"...\"}\n"
             "You must return ONLY a JSON object: {\"tool\": \"...\", \"arguments\": {...}}.\n"
             "Never generate Cypher or SQL. If the query is unrelated, return {\"tool\": \"out_of_scope\", \"arguments\": {}}."
         )

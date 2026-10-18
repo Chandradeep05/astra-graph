@@ -13,6 +13,7 @@ from app.tools.models import (
     ReviewerCandidate,
     VerifiedReviewersResponse,
 )
+from app.context.models import ContextPackage
 from app.tools.registry import (
     InvalidToolArgumentsError,
     ToolRegistry,
@@ -326,6 +327,49 @@ class AgentCoordinator:
                 sync_info=tool_result.sync_info,
                 is_stale=(tool_result.reason_code == RefusalCode.STALE_DATA),
                 proposed_action=proposed_action,
+            )
+
+        if isinstance(tool_result, ContextPackage):
+            narration = self.llm_adapter.narrate(message, tool_result)
+
+            impact_list = [
+                {"file": d.target, "relationship": d.relationship_type, "strength": d.strength}
+                for d in tool_result.dependencies
+            ]
+            reviewers_list = [
+                {
+                    "person": c.name,
+                    "email": c.email,
+                    "commits": c.commit_count,
+                    "lines_added": c.lines_added,
+                    "lines_deleted": c.lines_deleted,
+                }
+                for c in tool_result.contributors
+            ]
+
+            return AskResponse(
+                question=message,
+                selected_tool=tool_call.tool,
+                tool_arguments=tool_call.arguments,
+                refused=tool_result.refusal,
+                verified=tool_result.verification.verified if tool_result.verification else not tool_result.refusal,
+                reason_code=tool_result.reason_code,
+                reason=tool_result.reason,
+                claims=tool_result.claims,
+                evidence=tool_result.evidence,
+                summary=tool_result.summary,
+                narration=narration,
+                impact=impact_list,
+                reviewers=reviewers_list,
+                verification=tool_result.verification,
+                sync_info={
+                    "sync_id": tool_result.freshness.sync_id,
+                    "head_sha": tool_result.freshness.head_sha,
+                    "synced_at": tool_result.freshness.synced_at,
+                    "commit_count": tool_result.freshness.commit_count,
+                } if tool_result.freshness else None,
+                is_stale=tool_result.freshness.is_stale if tool_result.freshness else False,
+                proposed_action=None,
             )
 
         # Fallback for unexpected tool output type

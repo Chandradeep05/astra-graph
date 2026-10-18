@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from app.core.config import settings
-from app.api.routes import health, ingest, reviewers, ask, actions, impact, impact_reviewers
+from app.api.routes import health, ingest, reviewers, ask, actions, impact, impact_reviewers, context
 
 app = FastAPI(
     title="ANVAYA API",
@@ -35,6 +35,10 @@ app.include_router(impact.router, prefix="/api/v1")
 # Register impact-to-reviewers routes
 app.include_router(impact_reviewers.router)
 app.include_router(impact_reviewers.router, prefix="/api/v1")
+
+# Register context package routes
+app.include_router(context.router)
+app.include_router(context.router, prefix="/api/v1")
 
 
 
