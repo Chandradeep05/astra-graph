@@ -1,0 +1,23 @@
+# Exclude Python backend and local dev files from Vercel static deployment
+backend/app/agent/
+backend/app/actions/
+backend/app/api/
+backend/app/context/
+backend/app/core/
+backend/app/db/
+backend/app/evidence/
+backend/app/ingest/
+backend/app/memory/
+backend/app/tools/
+backend/app/main.py
+backend/requirements.txt
+backend/tests/
+data/
+scratch/
+scripts/
+venv/
+.venv/
+.pytest_cache/
+Dockerfile
+render.yaml
+docker-compose.yml

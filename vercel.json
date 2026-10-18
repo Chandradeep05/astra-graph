@@ -1,5 +1,9 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
+  "framework": null,
+  "buildCommand": null,
+  "outputDirectory": "backend/app/static",
   "cleanUrls": true,
   "rewrites": [
     {
@@ -12,11 +16,7 @@
     },
     {
       "source": "/static/:path*",
-      "destination": "/backend/app/static/:path*"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/backend/app/static/$1"
+      "destination": "/:path*"
     }
   ]
 }
