@@ -396,31 +396,144 @@ Anvaya maintains a comprehensive, deterministic test suite covering every milest
 - `test_audit2r_remediation.py`: Trust boundary enforcement, action graph provenance, and fail-closed gates.
 - `test_audit3r_remediation.py`: Test graph isolation (`anvaya_test`), dotfile extraction, and context routing.
 - `test_final_hardening.py`: Adversarial hardening regression tests covering NULL-repo isolation, fail-closed memory constraints, path traversal prevention, and graph signature integrity.
+- `test_deployment_diagnostics.py`: Safe connection diagnostics, sanitization of credentials, CORS validation, and health monitoring.
 
 ```text
 ============================= test session starts =============================
 platform win32 -- Python 3.9.7, pytest-8.4.2
-collected 182 items
+collected 194 items
 
-backend/tests/test_actions.py .............                             [  7%]
-backend/tests/test_agent.py .............                               [ 14%]
-backend/tests/test_audit2r_remediation.py ............                  [ 20%]
-backend/tests/test_audit3r_remediation.py .........                     [ 25%]
-backend/tests/test_context_package.py ....................              [ 36%]
-backend/tests/test_evidence_verifier.py ............                    [ 43%]
-backend/tests/test_final_hardening.py ...........                       [ 49%]
-backend/tests/test_golden_workflow.py ..........                        [ 54%]
-backend/tests/test_health.py ...                                        [ 56%]
-backend/tests/test_impact.py ...............                            [ 64%]
-backend/tests/test_ingest.py .....                                      [ 67%]
-backend/tests/test_m12_frontend_integration.py ....................     [ 78%]
-backend/tests/test_memory.py ........                                   [ 82%]
+backend/tests/test_actions.py .............                             [  6%]
+backend/tests/test_agent.py .............                               [ 13%]
+backend/tests/test_audit2r_remediation.py ............                  [ 19%]
+backend/tests/test_audit3r_remediation.py .........                     [ 24%]
+backend/tests/test_context_package.py ....................              [ 34%]
+backend/tests/test_deployment_diagnostics.py ............               [ 40%]
+backend/tests/test_evidence_verifier.py ............                    [ 46%]
+backend/tests/test_final_hardening.py ...........                       [ 52%]
+backend/tests/test_golden_workflow.py ..........                        [ 57%]
+backend/tests/test_health.py ...                                        [ 59%]
+backend/tests/test_impact.py ...............                            [ 67%]
+backend/tests/test_ingest.py .....                                      [ 69%]
+backend/tests/test_m12_frontend_integration.py ....................     [ 79%]
+backend/tests/test_memory.py ........                                   [ 84%]
 backend/tests/test_multi_contributor.py .................               [ 92%]
 backend/tests/test_repo_isolation.py .......                            [ 96%]
 backend/tests/test_reviewers.py .......                                 [100%]
 
-============================ 182 passed in 38.57s ============================
+============================ 194 passed in 35.56s ============================
 ```
+
+---
+
+## Production Deployment Guide (Vercel + Render + FalkorDB)
+
+Anvaya is architected for decoupled cloud deployment:
+
+```text
+Browser / Client
+      │
+      ▼ (HTTPS)
+Vercel Edge Proxy / Frontend
+  - index.html, style.css, app.js, Cytoscape.js
+  - vercel.json rewrites (/health, /api/*)
+      │
+      ▼ (HTTPS / REST)
+Render Web Service (FastAPI)
+  - uvicorn app.main:app
+  - CORSMiddleware enabled
+  - Strict parameterization & fail-closed boundaries
+      │
+      ▼ (Redis Protocol / TLS, port 6379)
+FalkorDB Instance (Primary Graph Database)
+  - FalkorDB Cloud or self-hosted persistent instance
+  - Canonical graph: 'anvaya'
+```
+
+### 1. FalkorDB Setup & Persistence
+
+Anvaya requires a reachable FalkorDB instance:
+- **FalkorDB Cloud (Recommended)**: Create a free database at [cloud.falkordb.com](https://cloud.falkordb.com/).
+  Provides a persistent managed endpoint with hostname, port, and password.
+- **Self-Hosted Docker**: `docker compose up -d` (uses `falkordb/falkordb:latest` or pinned tag).
+  > **Persistence Note**: In Docker, ensure a persistent host volume or Docker named volume is mounted to preserve graph memory across restarts. Ephemeral container filesystems will reset constraints upon container recreation.
+
+### 2. Render Backend Deployment
+
+1. Create a new **Web Service** on [Render](https://render.com/) pointing to your GitHub repository.
+2. Configure settings:
+   - **Environment**: `Python 3`
+   - **Build Command**: `pip install -r backend/requirements.txt`
+   - **Start Command**: `uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port $PORT`
+   - **Health Check Path**: `/health`
+3. Configure Environment Variables on Render:
+   - `PYTHONPATH`: `backend`
+   - `APP_ENV`: `production`
+   - `PORT`: (Provided automatically by Render)
+   - `CORS_ORIGINS`: `https://your-app.vercel.app` (or comma-separated list of permitted origins)
+   - `FALKORDB_HOST`: Hostname of your FalkorDB instance (e.g. `db-xxxx.cloud.falkordb.com`)
+   - `FALKORDB_PORT`: Port of your FalkorDB instance (default `6379`)
+   - `FALKORDB_USERNAME`: (Optional, e.g. `default`)
+   - `FALKORDB_PASSWORD`: (Your FalkorDB password)
+   - `FALKORDB_GRAPH_NAME`: `anvaya`
+   - `FALKORDB_SSL`: `true` if your provider uses TLS/SSL, otherwise `false`
+
+*(Alternatively, deploy automatically using the included `render.yaml` Blueprint).*
+
+### 3. Vercel Frontend Deployment
+
+1. Create a new project on [Vercel](https://vercel.com/) importing your repository.
+2. In `vercel.json`, ensure the rewrites point to your deployed Render URL:
+   ```json
+   {
+     "rewrites": [
+       { "source": "/health", "destination": "https://your-render-service.onrender.com/health" },
+       { "source": "/api/:path*", "destination": "https://your-render-service.onrender.com/api/:path*" },
+       { "source": "/static/:path*", "destination": "/backend/app/static/:path*" },
+       { "source": "/(.*)", "destination": "/backend/app/static/$1" }
+     ]
+   }
+   ```
+3. Deploy. The browser interacts solely through Vercel's edge proxy or your configured backend URL; FalkorDB credentials remain strictly server-side.
+
+### 4. Remote Graph Ingestion (Seeding)
+
+To seed your remote production FalkorDB instance with the benchmark repositories (`ARTH` and `encode/databases`):
+```bash
+# Run locally pointing to remote instance:
+export FALKORDB_HOST="your-falkordb-host.cloud.falkordb.com"
+export FALKORDB_PORT="6379"
+export FALKORDB_PASSWORD="your-falkordb-password"
+export FALKORDB_GRAPH_NAME="anvaya"
+export FALKORDB_SSL="false"
+export PYTHONPATH="backend"
+
+python scripts/ingest_sample_data.py
+```
+
+### 5. Deployment Smoke Test
+
+Verify the live deployment from any terminal:
+```bash
+python scripts/smoke_test.py --base-url https://your-app.vercel.app
+```
+Or directly against the Render backend:
+```bash
+python scripts/smoke_test.py --base-url https://your-backend.onrender.com
+```
+
+### 6. FalkorDB Connection Diagnostics
+
+Anvaya includes safe, categorized diagnostics (`/health` returns HTTP 503 with structured details when unreachable without exposing credentials):
+
+| Error Category | Root Cause | Remediation |
+| :--- | :--- | :--- |
+| `dns_resolution_failed` | Host name cannot be resolved | Verify `FALKORDB_HOST` spelling and public DNS reachability |
+| `tcp_connection_refused` | Connection rejected on port | Ensure FalkorDB is running and firewall allows traffic on port `6379` |
+| `authentication_failed` | Incorrect credentials | Verify `FALKORDB_USERNAME` and `FALKORDB_PASSWORD` |
+| `tls_ssl_handshake_failed` | TLS certificate or SSL mismatch | Check `FALKORDB_SSL` setting (`true` vs `false`) |
+| `connection_timeout` | Network packet drop or firewall | Verify security groups and provider network access lists |
+| `graph_not_found` | Graph has not been initialized | Run `python scripts/ingest_sample_data.py` to seed graph |
 
 ---
 
