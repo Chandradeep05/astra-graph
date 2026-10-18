@@ -120,8 +120,8 @@ def test_reviewers_multiple_contributors_synthetic():
         # Bob: 2 commits, added 40, deleted 10 (most recent ts: 2026-10-02)
         # Carol: 1 commit, added 5, deleted 2 (most recent ts: 2026-09-30)
         seed_cypher = """
-        CREATE (f:File {path: 'src/core/router.py'})
-        CREATE (m:Module {path: 'src/core'})
+        CREATE (f:File {repo: 'arth', path: 'src/core/router.py'})
+        CREATE (m:Module {repo: 'arth', path: 'src/core'})
         CREATE (f)-[:IN_MODULE]->(m)
 
         CREATE (p1:Person {name: 'Alice Lead', email: 'alice@example.com'})

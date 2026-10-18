@@ -46,9 +46,10 @@ def test_action_creation_valid():
 
 
 def test_action_creation_missing_evidence_rejected():
-    """Action without evidence IDs must be rejected immediately."""
+    """Action without evidence IDs must be rejected immediately — ValidationError from Pydantic."""
+    from pydantic import ValidationError
     service = ActionService()
-    with pytest.raises(Exception):
+    with pytest.raises((ValidationError, ValueError)):
         ActionCreate(
             type=ActionType.REQUEST_REVIEW,
             repo="arth",
@@ -60,9 +61,11 @@ def test_action_creation_missing_evidence_rejected():
 
 
 def test_action_creation_invalid_type_rejected():
-    """Unsupported action types must be rejected."""
+    """Unsupported action types must raise a validation error — not silently swallowed."""
+    from pydantic import ValidationError
+    from app.actions.models import InvalidActionError
     service = ActionService()
-    with pytest.raises(Exception):
+    with pytest.raises((ValidationError, ValueError, InvalidActionError)):
         payload = ActionCreate(
             type="delete_database",  # type: ignore
             repo="arth",

@@ -201,7 +201,8 @@ def test_synthetic_multi_contributor_exclusion_and_changed_decision():
     # Setup Synthetic Graph
     setup_q = """
     CREATE (r:Repository {name: 'demo_multi'})
-    CREATE (f:File {path: 'src/main.py'})
+    CREATE (f:File {repo: 'demo_multi', path: 'src/main.py'})
+    CREATE (r)-[:CONTAINS]->(f)
     CREATE (p1:Person {name: 'Alice', email: 'alice@example.com'})
     CREATE (p2:Person {name: 'Bob', email: 'bob@example.com'})
     CREATE (c1:Commit {sha: 'sha_a1', ts: '2026-09-01T10:00:00Z'})

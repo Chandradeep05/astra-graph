@@ -29,11 +29,18 @@ def reset_singletons():
 
 
 def get_graph_signature(manager: FalkorDBManager, graph_name: str = "anvaya") -> dict:
-    """Computes a deterministic signature of node/edge/sync counts in a FalkorDB graph."""
+    """Computes a deterministic signature of node/edge/sync counts in a FalkorDB graph.
+
+    Raises ValueError if FalkorDB is unreachable, so callers can distinguish a genuine
+    empty signature from a connection failure (prevents vacuous {} == {} pass).
+    """
+    health = manager.check_health()
+    if not health.get("connected"):
+        raise ValueError(
+            f"Cannot compute graph signature for '{graph_name}': FalkorDB is not reachable. "
+            f"Error: {health.get('error', 'unknown')}"
+        )
     try:
-        health = manager.check_health()
-        if not health.get("connected"):
-            return {}
         g = manager.get_graph(graph_name)
         c_cnt = g.query("MATCH (c:Commit) RETURN count(c)").result_set[0][0]
         f_cnt = g.query("MATCH (f:File) RETURN count(f)").result_set[0][0]
@@ -53,9 +60,11 @@ def get_graph_signature(manager: FalkorDBManager, graph_name: str = "anvaya") ->
             "arth_head_sha": head_sha,
             "arth_sync_commits": sync_commits,
         }
+    except ValueError:
+        raise
     except Exception as exc:
-        logger.warning("Failed to inspect signature of graph '%s': %s", graph_name, exc)
-        return {}
+        raise ValueError(f"Failed to compute graph signature for '{graph_name}': {exc}") from exc
+
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -101,11 +110,25 @@ def isolate_and_protect_production_graph():
     yield
 
     # Verification: production graph must be completely unmodified
-    prod_after = get_graph_signature(manager, "anvaya")
-    assert prod_before == prod_after, (
-        f"CRITICAL TEST HYGIENE VIOLATION: Production graph 'anvaya' was mutated during pytest execution!\n"
-        f"Before: {prod_before}\nAfter: {prod_after}"
-    )
+    try:
+        prod_after = get_graph_signature(manager, "anvaya")
+        assert prod_before == prod_after, (
+            f"CRITICAL TEST HYGIENE VIOLATION: Production graph 'anvaya' was mutated during pytest execution!\n"
+            f"Before: {prod_before}\nAfter: {prod_after}"
+        )
+    except ValueError as exc:
+        # FalkorDB connectivity was lost after tests — cannot verify invariance.
+        # This is a test infrastructure failure, not a production-graph mutation.
+        logger.error(
+            "Production graph invariance check SKIPPED: FalkorDB became unreachable after tests. "
+            "This may indicate test infrastructure issues. Error: %s",
+            exc,
+        )
+        raise AssertionError(
+            f"Production graph invariance check could not be completed because FalkorDB became "
+            f"unreachable after tests. This is a test infrastructure failure. Error: {exc}"
+        ) from exc
+
 
 
 @pytest.fixture(autouse=True)

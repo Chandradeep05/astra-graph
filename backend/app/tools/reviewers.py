@@ -66,8 +66,7 @@ def reviewers_for(
 
     if target_type == "file":
         query = """
-        MATCH (f:File {path: $target_path})
-        WHERE f.repo = $repo_name OR f.repo IS NULL
+        MATCH (f:File {repo: $repo_name, path: $target_path})
         MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f)
         WHERE NOT (p.email IN $exclude_emails)
         WITH p, c, t
@@ -97,10 +96,8 @@ def reviewers_for(
         }
     else:
         query = """
-        MATCH (m:Module {path: $target_module})
-        WHERE m.repo = $repo_name OR m.repo IS NULL
-        MATCH (f:File)-[:IN_MODULE]->(m)
-        WHERE f.repo = $repo_name OR f.repo IS NULL
+        MATCH (m:Module {repo: $repo_name, path: $target_module})
+        MATCH (f:File {repo: $repo_name})-[:IN_MODULE]->(m)
         MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f)
         WHERE NOT (p.email IN $exclude_emails)
         WITH p, c, t
@@ -310,7 +307,18 @@ def get_verified_reviewers(
                     "source_action_id": c_action_id,
                 }
     except Exception as exc:
-        logger.debug("Memory constraints read note: %s", exc)
+        # Fail-closed: if the trust enforcement mechanism (constraint query) fails,
+        # refuse rather than silently skipping exclusion and showing constrained reviewers.
+        logger.error("Memory constraints query failed — refusing rather than failing open: %s", exc)
+        return VerifiedReviewersResponse(
+            refused=True,
+            reason_code=RefusalCode.NO_PATH,
+            reason=f"Memory constraint enforcement failed: FalkorDB query error. Refusing to return potentially non-compliant candidates. Error: {str(exc)}",
+            target=target,
+            target_type=target_type,
+            repo_name=repo_name,
+        )
+
 
     # Filter candidates based on active constraints
     filtered_candidates: List[ReviewerCandidate] = []
@@ -369,8 +377,7 @@ def get_verified_reviewers(
         # Query individual commit touch details for this candidate to construct granular evidence
         if target_type == "file":
             touch_q = """
-            MATCH (f:File {path: $target})
-            WHERE f.repo = $repo_name OR f.repo IS NULL
+            MATCH (f:File {repo: $repo_name, path: $target})
             MATCH (p:Person {email: $email})-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f)
             RETURN c.sha, c.ts, t.added, t.deleted
             ORDER BY c.ts DESC
@@ -378,10 +385,8 @@ def get_verified_reviewers(
             """
         else:
             touch_q = """
-            MATCH (m:Module {path: $target})
-            WHERE m.repo = $repo_name OR m.repo IS NULL
-            MATCH (f:File)-[:IN_MODULE]->(m)
-            WHERE f.repo = $repo_name OR f.repo IS NULL
+            MATCH (m:Module {repo: $repo_name, path: $target})
+            MATCH (f:File {repo: $repo_name})-[:IN_MODULE]->(m)
             MATCH (p:Person {email: $email})-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f)
             RETURN c.sha, c.ts, sum(t.added) AS added, sum(t.deleted) AS deleted
             ORDER BY c.ts DESC
