@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anvaya — Software Knowledge Graph on FalkorDB</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/vendor/cytoscape.min.js"></script>
+</head>
+<body>
+
+  <!-- App Header -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-icon">अ</div>
+      <div>
+        <div class="brand-title">ANVAYA</div>
+        <div class="brand-tagline">Sanskrit: <em>connection, lineage</em> — Engineering Knowledge Graph on FalkorDB</div>
+      </div>
+    </div>
+    <div class="header-status">
+      <div class="status-badge" id="falkordb-badge">
+        <span class="status-dot" id="falkordb-dot"></span>
+        <span id="falkordb-status-text">FalkorDB: Checking...</span>
+      </div>
+      <button class="btn btn-secondary btn-sm" id="btn-reset-demo" title="Clears test constraints for Tom Christie">
+        ↺ Reset Demo State
+      </button>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <nav class="nav-tabs">
+    <button class="tab-btn active" data-tab="tab-ask">
+      <span>⚡</span> Ask & Investigate
+    </button>
+    <button class="tab-btn" data-tab="tab-graph">
+      <span>🕸</span> Interactive Graph Explorer
+    </button>
+    <button class="tab-btn" data-tab="tab-context">
+      <span>📦</span> Repository Context Package
+    </button>
+    <button class="tab-btn" data-tab="tab-memory">
+      <span>🧠</span> Persistent Graph Memory
+    </button>
+  </nav>
+
+  <!-- Main Content Container -->
+  <main class="main-content">
+
+    <!-- ============================================================== -->
+    <!-- Tab 1: Ask & Investigate                                       -->
+    <!-- ============================================================== -->
+    <section id="tab-ask" class="tab-view active">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title"><span>🔍</span> Evidence-Backed Engineering Intelligence</div>
+          <span class="badge badge-verified">FalkorDB Closed Loop</span>
+        </div>
+
+        <form id="ask-form">
+          <div class="input-row">
+            <select id="ask-repo-select" class="select-field">
+              <option value="databases" selected>Repo: encode/databases</option>
+              <option value="arth">Repo: chandradeep05/ARTH</option>
+            </select>
+            <input
+              type="text"
+              id="ask-input"
+              class="input-field"
+              placeholder="Ask Anvaya (e.g. 'I'm modifying databases/backends/postgres.py. What could this affect and who should review it?')"
+              required
+            />
+            <button type="submit" class="btn" id="btn-ask-submit">Investigate</button>
+          </div>
+        </form>
+
+        <div class="presets-list">
+          <span style="font-size: 11px; color: var(--text-muted); align-self: center;">QUICK PRESETS:</span>
+          <button class="preset-chip" data-query="I'm going to modify databases/backends/postgres.py. What could this affect, who should review it, and why?" data-repo="databases">
+            🎯 Golden Workflow: postgres.py (Impact + Reviewer)
+          </button>
+          <button class="preset-chip" data-query="Give me the context I need to understand ARTH." data-repo="arth">
+            📦 Understand ARTH (Repository Context)
+          </button>
+          <button class="preset-chip" data-query="Who should review backend/app/engines/assistant/engine.py?" data-repo="arth">
+            👤 Reviewer: ARTH assistant/engine.py
+          </button>
+          <button class="preset-chip" data-query="What is the blast radius and impact of modifying databases/core.py?" data-repo="databases">
+            💥 Blast Radius: databases/core.py
+          </button>
+          <button class="preset-chip" data-query="Who should review nonexistent/unknown.py and what will it break?" data-repo="databases">
+            🛡 Refusal Test: Unknown File (Fail-Closed)
+          </button>
+        </div>
+      </div>
+
+      <!-- Loading Indicator -->
+      <div id="ask-loading" style="display: none; text-align: center; padding: 40px; color: var(--text-secondary);">
+        <div style="font-size: 24px; margin-bottom: 8px;">⚙️</div>
+        <div>Executing deterministic multi-hop graph traversal on FalkorDB...</div>
+      </div>
+
+      <!-- Results Area -->
+      <div id="ask-results" style="display: none;">
+        <!-- Refusal Alert (when refused) -->
+        <div id="refusal-box" class="refusal-alert" style="display: none;">
+          <div class="refusal-title" id="refusal-reason-code">[Refusal]</div>
+          <div id="refusal-message" style="font-size: 13px; color: #fda4af;"></div>
+        </div>
+
+        <div class="results-grid">
+          <!-- Left Column: Narration, Evidence Path, Reviewers, Impact -->
+          <div>
+            <!-- Narration & Summary -->
+            <div class="panel">
+              <div class="panel-header">
+                <div class="panel-title"><span>📝</span> Verified Narration</div>
+                <div id="ask-verification-badge"></div>
+              </div>
+              <div class="narration-box" id="ask-narration-text"></div>
+
+              <!-- Evidence Path Visualizer -->
+              <div id="evidence-path-section" class="evidence-path-container" style="display: none;">
+                <div style="font-size: 12px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase;">
+                  <span>⛓️</span> Supporting Graph Lineage (Multi-Hop Proof)
+                </div>
+                <div class="path-step-flow" id="evidence-path-steps"></div>
+              </div>
+            </div>
+
+            <!-- Reviewer Candidates -->
+            <div class="panel" id="reviewers-panel" style="display: none;">
+              <div class="panel-header">
+                <div class="panel-title"><span>👥</span> Ranked Reviewer Candidates</div>
+                <span style="font-size: 11px; color: var(--text-muted);">Grounded in commit touch & line churn</span>
+              </div>
+              <table class="data-table" id="reviewers-table">
+                <thead>
+                  <tr>
+                    <th>Candidate</th>
+                    <th>Direct Commits</th>
+                    <th>Co-Change Commits</th>
+                    <th>Lines Touched</th>
+                    <th>Status / Constraint</th>
+                  </tr>
+                </thead>
+                <tbody id="reviewers-tbody"></tbody>
+              </table>
+            </div>
+
+            <!-- Impact (Blast Radius) -->
+            <div class="panel" id="impact-panel" style="display: none;">
+              <div class="panel-header">
+                <div class="panel-title"><span>💥</span> Blast Radius (Historical Co-Changes)</div>
+                <span style="font-size: 11px; color: var(--text-muted);">FalkorDB :CO_CHANGES relationship</span>
+              </div>
+              <table class="data-table" id="impact-table">
+                <thead>
+                  <tr>
+                    <th>Co-Changing File</th>
+                    <th>Shared Commits</th>
+                    <th>Relationship Strength</th>
+                  </tr>
+                </thead>
+                <tbody id="impact-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right Column: Proposed Action & Verified Claims -->
+          <div>
+            <!-- Action Lifecycle Box -->
+            <div class="panel">
+              <div class="panel-header">
+                <div class="panel-title"><span>⚡</span> Safe Action Lifecycle</div>
+                <span style="font-size: 11px; color: var(--text-muted);">Human-in-the-Loop Gate</span>
+              </div>
+
+              <div id="no-action-box" style="color: var(--text-muted); font-size: 13px; padding: 12px 0;">
+                No action proposed for this query. Actions are only proposed when candidate reviewers have verified evidence.
+              </div>
+
+              <div id="action-box" class="action-box" style="display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);" id="action-type-label">REQUEST_REVIEW</span>
+                  <span class="badge badge-proposed" id="action-status-badge">PROPOSED</span>
+                </div>
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 4px;" id="action-target-label"></div>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;" id="action-reviewer-label"></div>
+                <div style="font-size: 12px; color: var(--text-muted); line-height: 1.4;" id="action-reason-label"></div>
+
+                <div class="action-actions" id="action-buttons-row">
+                  <button class="btn btn-success btn-sm" id="btn-approve-action">✓ Approve & Execute</button>
+                  <button class="btn btn-danger btn-sm" id="btn-reject-action">✗ Reject & Add Constraint</button>
+                </div>
+
+                <!-- Post-execution outcome card -->
+                <div id="action-outcome-box" style="display: none; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);">
+                  <div style="font-size: 11px; font-weight: 700; color: var(--accent-cyan); margin-bottom: 4px;">FALKORDB PROVENANCE:</div>
+                  <div style="font-size: 12px; font-family: var(--font-mono); color: var(--text-secondary);" id="action-outcome-text"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Evidence Records Details -->
+            <div class="panel">
+              <div class="panel-header">
+                <div class="panel-title"><span>🛡️</span> Verified Claims & Evidence</div>
+              </div>
+              <div id="claims-evidence-list" style="max-height: 340px; overflow-y: auto;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================== -->
+    <!-- Tab 2: Interactive Graph Explorer                              -->
+    <!-- ============================================================== -->
+    <section id="tab-graph" class="tab-view">
+      <div class="panel" style="margin-bottom: 14px;">
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+          <select id="graph-repo-select" class="select-field">
+            <option value="databases" selected>Repo: encode/databases</option>
+            <option value="arth">Repo: chandradeep05/ARTH</option>
+          </select>
+
+          <input
+            type="text"
+            id="graph-subject-input"
+            class="input-field"
+            placeholder="Focus subject path (optional, e.g. 'databases/backends/postgres.py')"
+            style="max-width: 380px;"
+          />
+
+          <select id="graph-layout-select" class="select-field">
+            <option value="cose" selected>Layout: Force-Directed (cose)</option>
+            <option value="concentric">Layout: Concentric</option>
+            <option value="breadthfirst">Layout: Hierarchy</option>
+          </select>
+
+          <label style="font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px;">
+            Nodes:
+            <input type="range" id="graph-node-limit" min="20" max="100" value="60" style="width: 80px;" />
+            <span id="graph-node-limit-val">60</span>
+          </label>
+
+          <button class="btn btn-secondary btn-sm" id="btn-render-graph">Render Graph</button>
+          <button class="btn btn-secondary btn-sm" id="btn-fit-graph">Fit View</button>
+        </div>
+      </div>
+
+      <div class="explorer-layout">
+        <!-- Cytoscape Canvas -->
+        <div style="position: relative;">
+          <div id="cy"></div>
+          <div style="position: absolute; bottom: 12px; left: 12px; background: rgba(15, 23, 42, 0.85); padding: 8px 14px; border-radius: var(--radius-md); border: 1px solid var(--border); font-size: 11px; display: flex; gap: 12px; pointer-events: none;">
+            <span><span style="color: #8b5cf6;">●</span> Repo</span>
+            <span><span style="color: #6366f1;">●</span> Module</span>
+            <span><span style="color: #3b82f6;">●</span> File</span>
+            <span><span style="color: #f59e0b;">●</span> Commit</span>
+            <span><span style="color: #10b981;">●</span> Person</span>
+            <span><span style="color: #f43f5e;">●</span> Constraint</span>
+            <span><span style="color: #06b6d4;">●</span> Action</span>
+          </div>
+        </div>
+
+        <!-- Node Inspector Sidebar -->
+        <div class="inspector-panel" id="inspector-panel">
+          <div style="font-size: 14px; font-weight: 700; margin-bottom: 12px; color: var(--text-primary);">
+            Node Inspector
+          </div>
+          <div id="inspector-placeholder" style="color: var(--text-muted); font-size: 13px; text-align: center; margin-top: 60px;">
+            Click any graph node to inspect its structured properties and relationships.
+          </div>
+          <div id="inspector-details" style="display: none;"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================== -->
+    <!-- Tab 3: Repository Context & Package Viewer                     -->
+    <!-- ============================================================== -->
+    <section id="tab-context" class="tab-view">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title"><span>📦</span> Machine-Readable Repository Context Package</div>
+          <div style="font-size: 12px; color: var(--text-muted);">Bounded relational context for AI agents</div>
+        </div>
+
+        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+          <select id="ctx-repo-select" class="select-field">
+            <option value="arth" selected>Repo: chandradeep05/ARTH</option>
+            <option value="databases">Repo: encode/databases</option>
+          </select>
+          <input
+            type="text"
+            id="ctx-subject-input"
+            class="input-field"
+            placeholder="Subject (leave empty for entire repository context, or specify file path)"
+          />
+          <button class="btn" id="btn-fetch-context">Generate Package</button>
+        </div>
+
+        <div class="presets-list" style="margin-bottom: 14px;">
+          <span style="font-size: 11px; color: var(--text-muted); align-self: center;">QUICK LOAD:</span>
+          <button class="preset-chip" id="chip-ctx-arth">ARTH Entire Repository</button>
+          <button class="preset-chip" id="chip-ctx-arth-file">ARTH Assistant Engine (File)</button>
+          <button class="preset-chip" id="chip-ctx-db">Databases Entire Repository</button>
+          <button class="preset-chip" id="chip-ctx-db-file">Databases Postgres Backend (File)</button>
+        </div>
+
+        <!-- Freshness Card -->
+        <div id="ctx-freshness-bar" style="background-color: var(--bg-surface); padding: 10px 16px; border-radius: var(--radius-md); border: 1px solid var(--border); margin-bottom: 16px; font-size: 12px; font-family: var(--font-mono); display: none;"></div>
+
+        <!-- View Mode Switch -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary btn-sm" id="btn-ctx-human-tab">Human-Readable Context</button>
+            <button class="btn btn-secondary btn-sm" id="btn-ctx-json-tab">Machine-Readable JSON</button>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="btn-copy-json" style="display: none;">Copy JSON</button>
+        </div>
+
+        <!-- Human View -->
+        <div id="ctx-human-view" style="display: block;">
+          <div id="ctx-summary-box" class="narration-box" style="margin-bottom: 16px;"></div>
+
+          <div class="results-grid">
+            <div>
+              <div class="panel">
+                <div class="panel-header"><div class="panel-title">Architecture Modules</div></div>
+                <div id="ctx-modules-container"></div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-header"><div class="panel-title">Tracked Files (Top Churn)</div></div>
+                <table class="data-table">
+                  <thead>
+                    <tr><th>Path</th><th>Commits</th><th>Lines Added</th><th>Lines Deleted</th></tr>
+                  </thead>
+                  <tbody id="ctx-files-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div>
+              <div class="panel">
+                <div class="panel-header"><div class="panel-title">Key Contributors</div></div>
+                <div id="ctx-contributors-list"></div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-header"><div class="panel-title">Explicit Limitations</div></div>
+                <ul id="ctx-limitations-list" style="font-size: 12px; color: var(--text-secondary); padding-left: 20px; line-height: 1.6;"></ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- JSON View -->
+        <div id="ctx-json-view" style="display: none;">
+          <pre class="code-block" id="ctx-json-pre"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================== -->
+    <!-- Tab 4: Persistent Memory Demonstration                         -->
+    <!-- ============================================================== -->
+    <section id="tab-memory" class="tab-view">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title"><span>🧠</span> Persistent Graph Memory (Track 02 Closed Loop)</div>
+          <span class="badge badge-verified">State Surviving Fresh Sessions</span>
+        </div>
+
+        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.6;">
+          Demonstrates how human decisions write <code style="color: var(--accent-rose);">(:Constraint)</code> nodes directly into FalkorDB, changing the agent's future recommendations across completely separate sessions without in-memory state.
+        </p>
+
+        <!-- Golden Workflow Storyboard -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+          <!-- Step 1: Session 1 Baseline -->
+          <div class="panel" style="background-color: var(--bg-surface);">
+            <div style="font-weight: 700; font-size: 14px; color: var(--accent-amber); margin-bottom: 8px;">
+              SESSION 1: Baseline Reviewer Recommendation
+            </div>
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
+              User asks: <em>"Who should review databases/backends/postgres.py?"</em>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="btn-demo-session-1">
+              ▶ Run Session 1
+            </button>
+            <div id="demo-s1-output" style="margin-top: 12px; font-size: 12px; font-family: var(--font-mono); color: var(--text-primary);"></div>
+          </div>
+
+          <!-- Step 2: Human Decision & Constraint Persistence -->
+          <div class="panel" style="background-color: var(--bg-surface);">
+            <div style="font-weight: 700; font-size: 14px; color: var(--accent-rose); margin-bottom: 8px;">
+              HUMAN DECISION: Mark Reviewer Unavailable
+            </div>
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
+              Human rejects Tom Christie -> writes <code style="color: var(--accent-rose);">reviewer_unavailable</code> constraint to FalkorDB.
+            </div>
+            <button class="btn btn-danger btn-sm" id="btn-demo-record-constraint">
+              ✍ Record Constraint in FalkorDB
+            </button>
+            <div id="demo-constraint-output" style="margin-top: 12px; font-size: 12px; font-family: var(--font-mono); color: var(--text-primary);"></div>
+          </div>
+        </div>
+
+        <!-- Step 3: Session 2 Changed Decision -->
+        <div class="panel" style="background-color: var(--bg-surface); margin-bottom: 20px;">
+          <div style="font-weight: 700; font-size: 14px; color: var(--accent-emerald); margin-bottom: 8px;">
+            SESSION 2: Fresh Process with Persistent Graph Memory
+          </div>
+          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
+            User asks the <strong>exact same question</strong> in a fresh session. The agent discovers the active constraint in FalkorDB, excludes Tom Christie, and elevates George Bogodukhov!
+          </div>
+          <button class="btn btn-success btn-sm" id="btn-demo-session-2">
+            ▶ Run Session 2 (Changed Decision)
+          </button>
+          <div id="demo-s2-output" style="margin-top: 12px; font-size: 12px; font-family: var(--font-mono); color: var(--text-primary);"></div>
+        </div>
+
+        <!-- Active Constraints Table in FalkorDB -->
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span>📋</span> Active Memory Constraints in FalkorDB</div>
+            <button class="btn btn-secondary btn-sm" id="btn-refresh-memory">Refresh</button>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr><th>Constraint ID</th><th>Type</th><th>Subject</th><th>Scope</th><th>Active</th></tr>
+            </thead>
+            <tbody id="memory-constraints-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Rejection Modal -->
+  <div id="reject-modal" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">Reject Proposed Action & Record Memory</div>
+      <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
+        Provide a reason for rejection. This reason will be recorded as a persistent constraint in FalkorDB to influence future recommendations.
+      </p>
+      <input
+        type="text"
+        id="reject-reason-input"
+        class="input-field"
+        value="Reviewer unavailable / on sabbatical"
+        style="width: 100%; margin-bottom: 14px;"
+      />
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-modal-cancel">Cancel</button>
+        <button class="btn btn-danger" id="btn-modal-confirm">Confirm Rejection</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

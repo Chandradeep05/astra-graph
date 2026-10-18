@@ -1,6 +1,9 @@
-from fastapi import FastAPI
+from pathlib import Path
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
-from app.api.routes import health, ingest, reviewers, ask, actions, impact, impact_reviewers, context
+from app.api.routes import health, ingest, reviewers, ask, actions, impact, impact_reviewers, context, graph
 
 app = FastAPI(
     title="ANVAYA API",
@@ -40,15 +43,39 @@ app.include_router(impact_reviewers.router, prefix="/api/v1")
 app.include_router(context.router)
 app.include_router(context.router, prefix="/api/v1")
 
+# Register graph exploration routes
+app.include_router(graph.router)
+app.include_router(graph.router, prefix="/api/v1")
 
-
+# Static files for judge-facing engineering UI
+static_dir = Path(__file__).parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
 @app.get("/")
-def root():
+def root(request: Request):
+    if "text/html" in request.headers.get("accept", ""):
+        index_file = static_dir / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
     return {
         "service": "Anvaya API",
         "status": "online",
         "docs_url": "/docs",
         "health_url": "/health",
+        "ui_url": "/",
     }
+
+
+@app.get("/ui")
+@app.get("/app")
+def serve_ui():
+    index_file = static_dir / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    return {
+        "service": "Anvaya UI",
+        "status": "loading",
+    }
+
