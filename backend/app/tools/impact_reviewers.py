@@ -163,7 +163,17 @@ def impact_reviewers(
                     "source_action_id": c_action_id,
                 }
     except Exception as exc:
-        logger.debug("Memory constraints read note: %s", exc)
+        logger.error("Memory constraints query failed in impact_reviewers — refusing rather than failing open: %s", exc)
+        return ImpactReviewersResponse(
+            refused=True,
+            reason_code=RefusalCode.NO_PATH,
+            reason=f"Memory constraint enforcement failed: FalkorDB query error. Refusing to return potentially non-compliant candidates. Error: {str(exc)}",
+            target_file=target,
+            repo_name=repo_name,
+            impacted_files_count=len(co_change_paths),
+            impacted_files=impact_res.impacted_files,
+            sync_info=impact_res.sync_info,
+        )
 
     # Filter out constrained candidates
     eligible_raw = []

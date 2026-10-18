@@ -5,10 +5,27 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.api.routes import health, ingest, reviewers, ask, actions, impact, impact_reviewers, context, graph
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(
     title="ANVAYA API",
     description="Graph-Powered Code Intelligence using FalkorDB",
     version="0.1.0",
+)
+
+# Configure CORS for multi-origin deployment (e.g., Vercel frontend calling Render backend)
+cors_raw = settings.cors_origins.strip()
+origins = [o.strip() for o in cors_raw.split(",") if o.strip()]
+if not origins:
+    origins = ["*"]
+
+allow_all = origins == ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=not allow_all,  # Do NOT use wildcard CORS together with credentials
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Register health check routes

@@ -18,6 +18,8 @@ def health_check(manager: FalkorDBManager = Depends(get_falkor_manager)):
     if db_health["connected"]:
         return {
             "status": "healthy",
+            "database": "falkordb",
+            "graph": db_health.get("graph"),
             "falkordb": db_health,
         }
 
@@ -25,6 +27,9 @@ def health_check(manager: FalkorDBManager = Depends(get_falkor_manager)):
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={
             "status": "unhealthy",
+            "database": "falkordb",
+            "graph": db_health.get("graph"),
+            "error_category": db_health.get("error_category"),
             "falkordb": db_health,
         },
     )
