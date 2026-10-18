@@ -8,11 +8,11 @@
   "rewrites": [
     {
       "source": "/health",
-      "destination": "https://anvaya-backend.onrender.com/health"
+      "destination": "https://astra-graph.onrender.com/health"
     },
     {
       "source": "/api/:path*",
-      "destination": "https://anvaya-backend.onrender.com/api/:path*"
+      "destination": "https://astra-graph.onrender.com/api/:path*"
     },
     {
       "source": "/static/:path*",

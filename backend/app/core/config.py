@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,6 +29,25 @@ class Settings(BaseSettings):
     falkordb_graph_name: str = Field(default="anvaya", validation_alias=AliasChoices("FALKORDB_GRAPH_NAME", "falkordb_graph_name"))
     falkordb_ssl: bool = Field(default=False, validation_alias=AliasChoices("FALKORDB_SSL", "falkordb_ssl"))
     falkordb_url: Optional[str] = Field(default=None, validation_alias=AliasChoices("FALKORDB_URL", "falkordb_url"))
+
+    @field_validator("falkordb_ssl", mode="before")
+    @classmethod
+    def parse_ssl(cls, v):
+        if isinstance(v, str):
+            v_clean = v.strip().lower()
+            return v_clean in ("true", "1", "t", "yes", "y")
+        return bool(v)
+
+    @field_validator("falkordb_host", mode="before")
+    @classmethod
+    def parse_host(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            if ":" in v and not v.startswith("["):
+                parts = v.split(":")
+                return parts[0]
+        return v
+
 
 
 settings = Settings()

@@ -72,8 +72,15 @@ class FalkorDBManager:
         ssl: Optional[bool] = None,
         url: Optional[str] = None,
     ):
-        self.host = host or settings.falkordb_host
-        self.port = port or settings.falkordb_port
+        raw_host = host or settings.falkordb_host
+        raw_port = port or settings.falkordb_port
+        if raw_host and ":" in raw_host and not raw_host.startswith("["):
+            parts = raw_host.split(":")
+            raw_host = parts[0]
+            if len(parts) > 1 and parts[1].isdigit():
+                raw_port = int(parts[1])
+        self.host = raw_host
+        self.port = raw_port
         self.username = username if username is not None else settings.falkordb_username
         self.password = password if password is not None else settings.falkordb_password
         self.graph_name = graph_name or settings.falkordb_graph_name
