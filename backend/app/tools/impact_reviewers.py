@@ -83,9 +83,9 @@ def impact_reviewers(
     co_change_paths = [f.path for f in impact_res.impacted_files]
     all_paths = [target] + co_change_paths
 
-    # 4. Query contributors who touched ANY of all_paths
+    # 4. Query contributors who touched ANY of all_paths within this repository
     contrib_q = """
-    MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File)
+    MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File {repo: $repo_name})
     WHERE f.path IN $all_paths
     RETURN p.name AS person_name,
            p.email AS person_email,
@@ -94,7 +94,7 @@ def impact_reviewers(
            collect(DISTINCT c.sha)[0..10] AS shas,
            max(c.ts) AS last_ts
     """
-    res = graph.query(contrib_q, {"all_paths": all_paths})
+    res = graph.query(contrib_q, {"all_paths": all_paths, "repo_name": repo_name})
 
     # Aggregate contributions per person email
     person_data: Dict[str, Dict[str, Any]] = {}
@@ -248,12 +248,12 @@ def impact_reviewers(
 
         # Query full commit details for candidate's relevant touches to ensure 100% evidence verification
         touch_detail_q = """
-        MATCH (p:Person {email: $email})-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File)
+        MATCH (p:Person {email: $email})-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File {repo: $repo_name})
         WHERE f.path IN $rel_files
         RETURN c.sha, c.ts, f.path
         ORDER BY c.ts DESC
         """
-        detail_res = graph.query(touch_detail_q, {"email": d["email"], "rel_files": rel_files_list})
+        detail_res = graph.query(touch_detail_q, {"email": d["email"], "rel_files": rel_files_list, "repo_name": repo_name})
 
         cand_ev_ids: List[str] = []
         if detail_res and detail_res.result_set:

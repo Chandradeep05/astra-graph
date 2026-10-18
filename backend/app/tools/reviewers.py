@@ -66,8 +66,10 @@ def reviewers_for(
 
     if target_type == "file":
         query = """
-        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File)
-        WHERE f.path = $target_path AND NOT (p.email IN $exclude_emails)
+        MATCH (f:File {path: $target_path})
+        WHERE f.repo = $repo_name OR f.repo IS NULL
+        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f)
+        WHERE NOT (p.email IN $exclude_emails)
         WITH p, c, t
         ORDER BY c.ts DESC
         WITH p,
@@ -89,13 +91,18 @@ def reviewers_for(
         """
         params = {
             "target_path": target,
+            "repo_name": repo_name,
             "exclude_emails": excluded,
             "limit": limit,
         }
     else:
         query = """
-        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File)-[:IN_MODULE]->(m:Module)
-        WHERE m.path = $target_module AND NOT (p.email IN $exclude_emails)
+        MATCH (m:Module {path: $target_module})
+        WHERE m.repo = $repo_name OR m.repo IS NULL
+        MATCH (f:File)-[:IN_MODULE]->(m)
+        WHERE f.repo = $repo_name OR f.repo IS NULL
+        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f)
+        WHERE NOT (p.email IN $exclude_emails)
         WITH p, c, t
         ORDER BY c.ts DESC
         WITH p,
@@ -117,6 +124,7 @@ def reviewers_for(
         """
         params = {
             "target_module": target,
+            "repo_name": repo_name,
             "exclude_emails": excluded,
             "limit": limit,
         }
@@ -339,21 +347,27 @@ def get_verified_reviewers(
         # Query individual commit touch details for this candidate to construct granular evidence
         if target_type == "file":
             touch_q = """
-            MATCH (p:Person {email: $email})-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File {path: $target})
+            MATCH (f:File {path: $target})
+            WHERE f.repo = $repo_name OR f.repo IS NULL
+            MATCH (p:Person {email: $email})-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f)
             RETURN c.sha, c.ts, t.added, t.deleted
             ORDER BY c.ts DESC
             LIMIT $max_ev
             """
         else:
             touch_q = """
-            MATCH (p:Person {email: $email})-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File)-[:IN_MODULE]->(m:Module {path: $target})
+            MATCH (m:Module {path: $target})
+            WHERE m.repo = $repo_name OR m.repo IS NULL
+            MATCH (f:File)-[:IN_MODULE]->(m)
+            WHERE f.repo = $repo_name OR f.repo IS NULL
+            MATCH (p:Person {email: $email})-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f)
             RETURN c.sha, c.ts, sum(t.added) AS added, sum(t.deleted) AS deleted
             ORDER BY c.ts DESC
             LIMIT $max_ev
             """
 
         max_ev = max(max_evidence, cand.commit_count)
-        t_res = graph.query(touch_q, {"email": cand.person_email, "target": target, "max_ev": max_ev})
+        t_res = graph.query(touch_q, {"email": cand.person_email, "target": target, "repo_name": repo_name, "max_ev": max_ev})
         cand_ev_ids = []
 
 

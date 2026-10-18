@@ -132,11 +132,14 @@ def get_graph_data(
             "commit_count": int(row[3]) if row[3] else 0,
         }
 
+    bounded_max_nodes = max_nodes if isinstance(max_nodes, int) else 80
+    bounded_max_edges = max_edges if isinstance(max_edges, int) else 150
+
     # Helper to add node
     def add_node(nid: str, label: str, ntype: str, props: Dict[str, Any]) -> None:
         nonlocal truncated
         if nid not in nodes_map:
-            if len(nodes_map) >= max_nodes:
+            if len(nodes_map) >= bounded_max_nodes:
                 truncated = True
                 return
             nodes_map[nid] = GraphNode(id=nid, label=label, type=ntype, properties=props)
@@ -145,7 +148,7 @@ def get_graph_data(
     def add_edge(eid: str, src: str, tgt: str, rel_type: str, props: Dict[str, Any]) -> None:
         nonlocal truncated
         if eid not in edges_map:
-            if len(edges_map) >= max_edges:
+            if len(edges_map) >= bounded_max_edges:
                 truncated = True
                 return
             if src in nodes_map and tgt in nodes_map:
@@ -157,22 +160,16 @@ def get_graph_data(
     repo_node_id = f"repo:{repo_name}"
     add_node(repo_node_id, repo_name, "Repository", {"name": repo_name, **freshness})
 
-    # Filter author clause for repository partitioning
-    if repo_name == "arth":
-        author_filter = "p.email = 'c4chandradeep2005@gmail.com'"
-    else:
-        author_filter = "p.email <> 'c4chandradeep2005@gmail.com'"
-
     # Target subject focus
-    target_subject = subject.strip() if subject else None
+    target_subject = subject.strip() if (isinstance(subject, str) and subject.strip()) else None
 
     if target_subject and ("/" in target_subject or "." in target_subject):
         # -------------------------------------------------------------
         # Subject File Focused Exploration
         # -------------------------------------------------------------
         f_res = graph.query(
-            "MATCH (f:File {path: $p}) OPTIONAL MATCH (f)-[:IN_MODULE]->(m:Module) RETURN f.path, m.path",
-            {"p": target_subject},
+            "MATCH (f:File {repo: $repo, path: $p}) OPTIONAL MATCH (f)-[:IN_MODULE]->(m:Module {repo: $repo}) RETURN f.path, m.path",
+            {"repo": repo_name, "p": target_subject},
         )
         if f_res and f_res.result_set:
             f_path = str(f_res.result_set[0][0])
@@ -187,13 +184,13 @@ def get_graph_data(
 
             # 2. Co-changes around subject file
             cc_q = """
-            MATCH (f:File {path: $p})-[cc:CO_CHANGES]-(other:File)
-            OPTIONAL MATCH (other)-[:IN_MODULE]->(om:Module)
+            MATCH (f:File {repo: $repo, path: $p})-[cc:CO_CHANGES]-(other:File {repo: $repo})
+            OPTIONAL MATCH (other)-[:IN_MODULE]->(om:Module {repo: $repo})
             RETURN other.path, om.path, cc.count, cc.last_ts
             ORDER BY cc.count DESC
             LIMIT 15
             """
-            cc_res = graph.query(cc_q, {"p": target_subject})
+            cc_res = graph.query(cc_q, {"repo": repo_name, "p": target_subject})
             if cc_res and cc_res.result_set:
                 for row in cc_res.result_set:
                     oth_path = str(row[0])
@@ -212,14 +209,13 @@ def get_graph_data(
                     )
 
             # 3. Direct Authors and Commits on subject file
-            auth_q = f"""
-            MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File {{path: $p}})
-            WHERE {author_filter}
+            auth_q = """
+            MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File {repo: $repo, path: $p})
             RETURN p.name, p.email, c.sha, c.committed_at, t.lines_added, t.lines_deleted
             ORDER BY c.committed_at DESC
             LIMIT 10
             """
-            auth_res = graph.query(auth_q, {"p": target_subject})
+            auth_res = graph.query(auth_q, {"repo": repo_name, "p": target_subject})
             if auth_res and auth_res.result_set:
                 for row in auth_res.result_set:
                     p_name = str(row[0])
@@ -243,14 +239,14 @@ def get_graph_data(
         # Repository-Level Graph Overview
         # -------------------------------------------------------------
         # Modules
-        mod_q = f"""
-        MATCH (p:Person)-[:AUTHORED]->(:Commit)-[:TOUCHES]->(f:File)-[:IN_MODULE]->(m:Module)
-        WHERE {author_filter}
+        mod_q = """
+        MATCH (r:Repository {name: $repo})-[:CONTAINS]->(m:Module)
+        OPTIONAL MATCH (f:File {repo: $repo})-[:IN_MODULE]->(m)
         RETURN DISTINCT m.path, count(DISTINCT f) AS f_cnt
         ORDER BY f_cnt DESC
         LIMIT 8
         """
-        mod_res = graph.query(mod_q)
+        mod_res = graph.query(mod_q, {"repo": repo_name})
         if mod_res and mod_res.result_set:
             for row in mod_res.result_set:
                 m_path = str(row[0])
@@ -260,15 +256,15 @@ def get_graph_data(
                 add_edge(f"mod_{repo_node_id}_{m_id}", repo_node_id, m_id, "CONTAINS", {})
 
         # Top files
-        files_q = f"""
-        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File)-[:IN_MODULE]->(m:Module)
-        WHERE {author_filter}
+        files_q = """
+        MATCH (f:File {repo: $repo})-[:IN_MODULE]->(m:Module {repo: $repo})
+        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f)
         WITH f, m, count(DISTINCT c) AS c_cnt, sum(t.added) AS added, sum(t.deleted) AS deleted
         ORDER BY c_cnt DESC
         LIMIT 20
         RETURN f.path, m.path, c_cnt, added, deleted
         """
-        files_res = graph.query(files_q)
+        files_res = graph.query(files_q, {"repo": repo_name})
         top_file_ids = set()
         if files_res and files_res.result_set:
             for row in files_res.result_set:
@@ -291,13 +287,13 @@ def get_graph_data(
         # Top co-changes among files
         if top_file_ids:
             cc_q = """
-            MATCH (f1:File)-[cc:CO_CHANGES]->(f2:File)
+            MATCH (f1:File {repo: $repo})-[cc:CO_CHANGES]->(f2:File {repo: $repo})
             WHERE f1.path IN $paths AND f2.path IN $paths AND cc.count >= 2
             RETURN f1.path, f2.path, cc.count, cc.last_ts
             ORDER BY cc.count DESC
             LIMIT 25
             """
-            cc_res = graph.query(cc_q, {"paths": list(top_file_ids)})
+            cc_res = graph.query(cc_q, {"repo": repo_name, "paths": list(top_file_ids)})
             if cc_res and cc_res.result_set:
                 for row in cc_res.result_set:
                     f1 = str(row[0])
@@ -310,15 +306,14 @@ def get_graph_data(
                     add_edge(f"cc_{f1}_{f2}", f1_id, f2_id, "CO_CHANGES", {"count": cnt, "last_ts": last_ts})
 
         # Top contributors
-        contrib_q = f"""
-        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File)
-        WHERE {author_filter}
+        contrib_q = """
+        MATCH (f:File {repo: $repo})<-[t:TOUCHES]-(c:Commit)<-[:AUTHORED]-(p:Person)
         WITH p, count(DISTINCT c) AS c_cnt, sum(t.added) AS added, sum(t.deleted) AS deleted
         ORDER BY c_cnt DESC
         LIMIT 6
         RETURN p.name, p.email, c_cnt, added, deleted
         """
-        contrib_res = graph.query(contrib_q)
+        contrib_res = graph.query(contrib_q, {"repo": repo_name})
         if contrib_res and contrib_res.result_set:
             for row in contrib_res.result_set:
                 p_name = str(row[0])
@@ -463,12 +458,12 @@ def get_evidence_path(
 
     # 1. Check direct commit path
     dir_q = """
-    MATCH (f:File {path: $file})<-[t:TOUCHES]-(c:Commit)<-[:AUTHORED]-(p:Person {name: $name})
+    MATCH (f:File {repo: $repo, path: $file})<-[t:TOUCHES]-(c:Commit)<-[:AUTHORED]-(p:Person {name: $name})
     RETURN c.sha, c.committed_at, t.lines_added, t.lines_deleted
     ORDER BY c.committed_at DESC
     LIMIT 3
     """
-    dir_res = graph.query(dir_q, {"file": target_file, "name": reviewer_name})
+    dir_res = graph.query(dir_q, {"repo": repo, "file": target_file, "name": reviewer_name})
     if dir_res and dir_res.result_set:
         row = dir_res.result_set[0]
         sha = str(row[0])
@@ -522,12 +517,12 @@ def get_evidence_path(
 
     # 2. Check co-change blast-radius path
     cc_path_q = """
-    MATCH (f:File {path: $file})-[cc:CO_CHANGES]-(other:File)<-[t:TOUCHES]-(c:Commit)<-[:AUTHORED]-(p:Person {name: $name})
+    MATCH (f:File {repo: $repo, path: $file})-[cc:CO_CHANGES]-(other:File {repo: $repo})<-[t:TOUCHES]-(c:Commit)<-[:AUTHORED]-(p:Person {name: $name})
     RETURN other.path, cc.count, c.sha, c.committed_at, t.lines_added, t.lines_deleted
     ORDER BY cc.count DESC, c.committed_at DESC
     LIMIT 1
     """
-    cc_path_res = graph.query(cc_path_q, {"file": target_file, "name": reviewer_name})
+    cc_path_res = graph.query(cc_path_q, {"repo": repo, "file": target_file, "name": reviewer_name})
     if cc_path_res and cc_path_res.result_set:
         row = cc_path_res.result_set[0]
         other_path = str(row[0])

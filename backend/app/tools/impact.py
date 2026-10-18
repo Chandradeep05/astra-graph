@@ -89,11 +89,11 @@ def change_impact(
 
     # 2. Verify target file exists in FalkorDB
     file_check_query = """
-    MATCH (f:File {path: $target_path})
+    MATCH (f:File {repo: $repo_name, path: $target_path})
     RETURN f.path LIMIT 1
     """
     try:
-        file_res = graph.query(file_check_query, {"target_path": target})
+        file_res = graph.query(file_check_query, {"target_path": target, "repo_name": repo_name})
     except Exception as exc:
         return ChangeImpactResponse(
             refused=True,
@@ -114,25 +114,25 @@ def change_impact(
             sync_info=sync_info,
         )
 
-    # 3. Query historical co-changes via CO_CHANGES relationship (undirected match)
+    # 3. Query historical co-changes via CO_CHANGES relationship (undirected match within repo)
     co_changes_query = """
-    MATCH (f:File {path: $target_path})-[cc:CO_CHANGES]-(other:File)
+    MATCH (f:File {repo: $repo_name, path: $target_path})-[cc:CO_CHANGES]-(other:File {repo: $repo_name})
     RETURN other.path AS other_path, cc.count AS count, cc.last_ts AS last_ts
     ORDER BY count DESC, last_ts DESC
     LIMIT $limit
     """
-    co_res = graph.query(co_changes_query, {"target_path": target, "limit": clamped_limit})
+    co_res = graph.query(co_changes_query, {"target_path": target, "repo_name": repo_name, "limit": clamped_limit})
 
     # 4. Query related people who have historically touched the target file
     people_query = """
-    MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[:TOUCHES]->(f:File {path: $target_path})
+    MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[:TOUCHES]->(f:File {repo: $repo_name, path: $target_path})
     RETURN p.name AS person_name,
            count(DISTINCT c) AS commit_count,
            collect(DISTINCT c.sha)[0..10] AS evidence_shas
     ORDER BY commit_count DESC
     LIMIT 10
     """
-    people_res = graph.query(people_query, {"target_path": target})
+    people_res = graph.query(people_query, {"target_path": target, "repo_name": repo_name})
     related_people: List[RelatedPerson] = []
     if people_res and people_res.result_set:
         for p_row in people_res.result_set:
@@ -176,8 +176,8 @@ def change_impact(
     claims: List[Claim] = []
 
     shared_commits_query = """
-    MATCH (c:Commit)-[:TOUCHES]->(f:File {path: $target_path}),
-          (c)-[:TOUCHES]->(other:File {path: $other_path})
+    MATCH (c:Commit)-[:TOUCHES]->(f:File {repo: $repo_name, path: $target_path}),
+          (c)-[:TOUCHES]->(other:File {repo: $repo_name, path: $other_path})
     RETURN c.sha, c.ts
     ORDER BY c.ts DESC
     LIMIT $max_shas
@@ -194,6 +194,7 @@ def change_impact(
             {
                 "target_path": target,
                 "other_path": other_path,
+                "repo_name": repo_name,
                 "max_shas": clamped_max_ev,
             },
         )

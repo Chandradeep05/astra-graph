@@ -233,30 +233,15 @@ class ContextPackageService:
         if "/" in subj or "." in subj:
             return subj, SubjectType.FILE
 
-        # Check if subject matches an existing module
+        # Check if subject matches an existing module in this repository
         mod_check = graph.query(
-            "MATCH (m:Module {path: $p}) RETURN m.path", {"p": subj}
+            "MATCH (m:Module {repo: $repo_name, path: $p}) RETURN m.path", {"p": subj, "repo_name": repo_name}
         )
         if mod_check and mod_check.result_set:
             return subj, SubjectType.MODULE
 
         # Default to file check
         return subj, SubjectType.FILE
-
-    # -------------------------------------------------------------------------
-    # Helper: Partitioning Condition
-    # -------------------------------------------------------------------------
-
-    def _get_author_filter_clause(self, repo_name: str, person_var: str = "p") -> str:
-        """
-        Partitions commits between ingested repositories cleanly.
-        ARTH commits: authored by chandradeep05.
-        Databases commits: authored by encode contributors.
-        """
-        if repo_name.lower() == "arth":
-            return f"({person_var}.email = 'c4chandradeep2005@gmail.com' OR {person_var}.name = 'chandradeep05')"
-        else:
-            return f"({person_var}.email <> 'c4chandradeep2005@gmail.com' AND {person_var}.name <> 'chandradeep05')"
 
     # -------------------------------------------------------------------------
     # Builder: Repository Context
@@ -272,21 +257,20 @@ class ContextPackageService:
         max_contributors: int,
         max_evidence: int,
     ) -> ContextPackage:
-        author_filter = self._get_author_filter_clause(repo_name, "p")
         claims: List[Claim] = []
         evidence: List[Evidence] = []
         truncated = False
         truncation_reasons: List[str] = []
 
         # 1. Modules
-        mod_q = f"""
-        MATCH (p:Person)-[:AUTHORED]->(:Commit)-[:TOUCHES]->(f:File)-[:IN_MODULE]->(m:Module)
-        WHERE {author_filter}
+        mod_q = """
+        MATCH (r:Repository {name: $repo_name})-[:CONTAINS]->(m:Module)
+        OPTIONAL MATCH (f:File {repo: $repo_name})-[:IN_MODULE]->(m)
         WITH m, count(DISTINCT f) AS f_cnt, collect(DISTINCT f.path)[0..5] AS samples
         ORDER BY f_cnt DESC
         RETURN m.path, f_cnt, samples
         """
-        mod_res = graph.query(mod_q)
+        mod_res = graph.query(mod_q, {"repo_name": repo_name})
         modules_list: List[ModuleContext] = []
 
         if mod_res and mod_res.result_set:
@@ -296,14 +280,15 @@ class ContextPackageService:
                 samples = [str(x) for x in row[2]] if isinstance(row[2], list) else []
 
                 # Fetch top 2 contributors for module
-                c_mod_q = f"""
-                MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[:TOUCHES]->(f:File)-[:IN_MODULE]->(m:Module {{path: $m_path}})
-                WHERE {author_filter}
+                c_mod_q = """
+                MATCH (m:Module {repo: $repo_name, path: $m_path})
+                MATCH (f:File {repo: $repo_name})-[:IN_MODULE]->(m)
+                MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[:TOUCHES]->(f)
                 RETURN p.name, count(DISTINCT c) AS c_cnt
                 ORDER BY c_cnt DESC
                 LIMIT 2
                 """
-                c_mod_res = graph.query(c_mod_q, {"m_path": m_path})
+                c_mod_res = graph.query(c_mod_q, {"m_path": m_path, "repo_name": repo_name})
                 top_m_contribs = (
                     [str(r[0]) for r in c_mod_res.result_set if r[0]]
                     if c_mod_res and c_mod_res.result_set
@@ -321,15 +306,15 @@ class ContextPackageService:
                 )
 
         # 2. Important Files (Ranked by commit touches & churn)
-        files_q = f"""
-        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File)-[:IN_MODULE]->(m:Module)
-        WHERE {author_filter}
+        files_q = """
+        MATCH (f:File {repo: $repo_name})-[:IN_MODULE]->(m:Module {repo: $repo_name})
+        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f)
         WITH f, m, count(DISTINCT c) AS c_cnt, sum(t.added) AS added, sum(t.deleted) AS deleted,
              max(c.ts) AS last_ts, collect(DISTINCT p.name)[0..3] AS authors
         ORDER BY c_cnt DESC, added + deleted DESC
         RETURN f.path, m.path, c_cnt, added, deleted, last_ts, authors
         """
-        files_res = graph.query(files_q)
+        files_res = graph.query(files_q, {"repo_name": repo_name})
         important_files: List[FileContext] = []
 
         if files_res and files_res.result_set:
@@ -347,9 +332,9 @@ class ContextPackageService:
                 last_ts = str(row[5]) if row[5] else ""
                 authors = [str(x) for x in row[6]] if isinstance(row[6], list) else []
 
-                # Count co-changing files
-                cc_q = "MATCH (f:File {path: $p})-[cc:CO_CHANGES]-(other:File) RETURN count(other)"
-                cc_res = graph.query(cc_q, {"p": f_path})
+                # Count co-changing files within repository
+                cc_q = "MATCH (f:File {repo: $repo_name, path: $p})-[cc:CO_CHANGES]-(other:File {repo: $repo_name}) RETURN count(other)"
+                cc_res = graph.query(cc_q, {"p": f_path, "repo_name": repo_name})
                 co_change_count = int(cc_res.result_set[0][0]) if cc_res and cc_res.result_set else 0
 
                 important_files.append(
@@ -365,16 +350,16 @@ class ContextPackageService:
                     )
                 )
 
-        # 3. Contributors
-        contrib_q = f"""
-        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File)
-        WHERE {author_filter}
+        # 3. Contributors within repository
+        contrib_q = """
+        MATCH (f:File {repo: $repo_name})
+        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f)
         WITH p, count(DISTINCT c) AS c_cnt, sum(t.added) AS added, sum(t.deleted) AS deleted,
              collect(DISTINCT f.path)[0..10] AS files, max(c.ts) AS last_ts
         ORDER BY c_cnt DESC
         RETURN p.name, p.email, c_cnt, added, deleted, files, last_ts
         """
-        contrib_res = graph.query(contrib_q)
+        contrib_res = graph.query(contrib_q, {"repo_name": repo_name})
         contributors: List[ContributorContext] = []
 
         # 4. Active Persistent Memory Constraints in FalkorDB
@@ -452,30 +437,18 @@ class ContextPackageService:
                             )
                         )
 
-        # 5. Frequent Co-Changes & Cross-Module Dependencies
-        deps_q = f"""
-        MATCH (f1:File)-[cc:CO_CHANGES]->(f2:File)
-        MATCH (f1)-[:IN_MODULE]->(m1:Module)
-        MATCH (f2)-[:IN_MODULE]->(m2:Module)
-        WHERE cc.count >= 2 AND {author_filter.replace('p.', 'p1.')}
-        WITH f1, f2, m1, m2, cc
-        ORDER BY cc.count DESC
-        RETURN f1.path, f2.path, m1.path, m2.path, cc.count, cc.last_ts
-        LIMIT $max_deps
-        """
-        # Join p1
-        deps_q_full = f"""
-        MATCH (p1:Person)-[:AUTHORED]->(:Commit)-[:TOUCHES]->(f1:File)
-        MATCH (f1)-[cc:CO_CHANGES]->(f2:File)
-        MATCH (f1)-[:IN_MODULE]->(m1:Module)
-        MATCH (f2)-[:IN_MODULE]->(m2:Module)
-        WHERE cc.count >= 2 AND {self._get_author_filter_clause(repo_name, 'p1')}
+        # 5. Frequent Co-Changes & Cross-Module Dependencies within repository
+        deps_q_full = """
+        MATCH (f1:File {repo: $repo_name})-[cc:CO_CHANGES]->(f2:File {repo: $repo_name})
+        MATCH (f1)-[:IN_MODULE]->(m1:Module {repo: $repo_name})
+        MATCH (f2)-[:IN_MODULE]->(m2:Module {repo: $repo_name})
+        WHERE cc.count >= 2
         WITH DISTINCT f1, f2, m1, m2, cc
         ORDER BY cc.count DESC
         LIMIT 30
         RETURN f1.path, f2.path, m1.path, m2.path, cc.count, cc.last_ts
         """
-        deps_res = graph.query(deps_q_full)
+        deps_res = graph.query(deps_q_full, {"repo_name": repo_name})
         dependencies: List[DependencyContext] = []
         cross_module_connections: List[Dict[str, Any]] = []
         frequent_co_changes: List[Dict[str, Any]] = []
@@ -671,11 +644,11 @@ class ContextPackageService:
 
         # 1. Verify File Exists in Graph
         f_check_q = """
-        MATCH (f:File {path: $p})
-        OPTIONAL MATCH (f)-[:IN_MODULE]->(m:Module)
+        MATCH (f:File {repo: $repo_name, path: $p})
+        OPTIONAL MATCH (f)-[:IN_MODULE]->(m:Module {repo: $repo_name})
         RETURN f.path, m.path
         """
-        f_res = graph.query(f_check_q, {"p": target})
+        f_res = graph.query(f_check_q, {"p": target, "repo_name": repo_name})
         if not f_res or not f_res.result_set:
             return self._refuse(
                 repository=repo_name,
@@ -689,15 +662,15 @@ class ContextPackageService:
         row_f = f_res.result_set[0]
         mod_path = str(row_f[1]) if row_f[1] else "root"
 
-        # 2. File Authorship & Contributor Lineage
+        # 2. File Authorship & Contributor Lineage within repository
         contrib_q = """
-        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File {path: $p})
+        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File {repo: $repo_name, path: $p})
         WITH p, count(DISTINCT c) AS c_cnt, sum(t.added) AS added, sum(t.deleted) AS deleted,
              collect(c.sha)[0..10] AS shas, max(c.ts) AS last_ts
         ORDER BY c_cnt DESC
         RETURN p.name, p.email, c_cnt, added, deleted, shas, last_ts
         """
-        contrib_res = graph.query(contrib_q, {"p": target})
+        contrib_res = graph.query(contrib_q, {"p": target, "repo_name": repo_name})
         contributors: List[ContributorContext] = []
 
         # 3. Memory Constraints
@@ -801,14 +774,14 @@ class ContextPackageService:
                             )
                         )
 
-        # 4. Blast-Radius Co-Changes
+        # 4. Blast-Radius Co-Changes within repository
         cc_q = """
-        MATCH (f:File {path: $p})-[cc:CO_CHANGES]-(other:File)
-        OPTIONAL MATCH (other)-[:IN_MODULE]->(om:Module)
+        MATCH (f:File {repo: $repo_name, path: $p})-[cc:CO_CHANGES]-(other:File {repo: $repo_name})
+        OPTIONAL MATCH (other)-[:IN_MODULE]->(om:Module {repo: $repo_name})
         RETURN other.path, om.path, cc.count, cc.last_ts
         ORDER BY cc.count DESC
         """
-        cc_res = graph.query(cc_q, {"p": target})
+        cc_res = graph.query(cc_q, {"p": target, "repo_name": repo_name})
         co_changing_files: List[Dict[str, Any]] = []
         related_modules: Set[str] = set()
         dependencies: List[DependencyContext] = []
@@ -1011,7 +984,10 @@ class ContextPackageService:
         max_contributors: int,
         max_evidence: int,
     ) -> ContextPackage:
-        m_check = graph.query("MATCH (m:Module {path: $p}) RETURN m.path", {"p": target_module})
+        m_check = graph.query(
+            "MATCH (m:Module {repo: $repo_name, path: $p}) RETURN m.path",
+            {"p": target_module, "repo_name": repo_name},
+        )
         if not m_check or not m_check.result_set:
             return self._refuse(
                 repository=repo_name,
@@ -1022,18 +998,16 @@ class ContextPackageService:
                 limitations=["Target module has no recorded files in the knowledge graph."],
             )
 
-        author_filter = self._get_author_filter_clause(repo_name, "p")
-
         # Files in module
-        files_q = f"""
-        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File)-[:IN_MODULE]->(m:Module {{path: $mod}})
-        WHERE {author_filter}
+        files_q = """
+        MATCH (f:File {repo: $repo_name})-[:IN_MODULE]->(m:Module {repo: $repo_name, path: $mod})
+        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f)
         WITH f, count(DISTINCT c) AS c_cnt, sum(t.added) AS added, sum(t.deleted) AS deleted, max(c.ts) AS last_ts
         ORDER BY c_cnt DESC
         LIMIT $max_files
         RETURN f.path, c_cnt, added, deleted, last_ts
         """
-        files_res = graph.query(files_q, {"mod": target_module, "max_files": max_files})
+        files_res = graph.query(files_q, {"repo_name": repo_name, "mod": target_module, "max_files": max_files})
         files: List[FileContext] = []
         if files_res and files_res.result_set:
             for row in files_res.result_set:
@@ -1049,15 +1023,15 @@ class ContextPackageService:
                 )
 
         # Contributors to module
-        contrib_q = f"""
-        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f:File)-[:IN_MODULE]->(m:Module {{path: $mod}})
-        WHERE {author_filter}
+        contrib_q = """
+        MATCH (f:File {repo: $repo_name})-[:IN_MODULE]->(m:Module {repo: $repo_name, path: $mod})
+        MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[t:TOUCHES]->(f)
         WITH p, count(DISTINCT c) AS c_cnt, sum(t.added) AS added, sum(t.deleted) AS deleted, max(c.ts) AS last_ts
         ORDER BY c_cnt DESC
         LIMIT $max_contrib
         RETURN p.name, p.email, c_cnt, added, deleted, last_ts
         """
-        contrib_res = graph.query(contrib_q, {"mod": target_module, "max_contrib": max_contributors})
+        contrib_res = graph.query(contrib_q, {"repo_name": repo_name, "mod": target_module, "max_contrib": max_contributors})
         contributors: List[ContributorContext] = []
         constraints = self._get_active_constraints(graph, repo_name)
         constrained_names = {c.subject for c in constraints}
