@@ -291,6 +291,23 @@ def change_impact(
     verifier = EvidenceVerifier()
     verification = verifier.verify(claims, evidence_list)
 
+    if not verification.verified:
+        return ChangeImpactResponse(
+            refused=True,
+            reason_code=RefusalCode.LOW_EVIDENCE,
+            reason=f"Evidence verification failed: {'; '.join(verification.rejection_reasons)}",
+            target_file=target,
+            repo_name=repo_name,
+            impacted_files=[],
+            related_people=[],
+            connected_modules=[],
+            signals=[f"Evidence verification failed: {'; '.join(verification.rejection_reasons)}"],
+            claims=claims,
+            evidence=evidence_list,
+            verification=verification,
+            sync_info=sync_info,
+        )
+
     return ChangeImpactResponse(
         refused=False,
         target_file=target,

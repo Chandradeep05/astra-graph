@@ -45,6 +45,7 @@ def ingest_repository(
             repo_name=repo_name,
             commits=commits,
             repo_path=request.repo_path,
+            graph_name=request.graph_name,
         )
         return {
             "status": "success",

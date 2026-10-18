@@ -3,6 +3,7 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.core.config import settings
 from app.db.falkor import FalkorDBManager
 
 
@@ -20,7 +21,7 @@ def test_health_endpoint_healthy():
             "connected": True,
             "host": "localhost",
             "port": 6379,
-            "graph": "anvaya",
+            "graph": settings.falkordb_graph_name,
             "version": "test-version",
             "error": None,
         }
@@ -30,7 +31,7 @@ def test_health_endpoint_healthy():
         data = response.json()
         assert data["status"] == "healthy"
         assert data["falkordb"]["connected"] is True
-        assert data["falkordb"]["graph"] == "anvaya"
+        assert data["falkordb"]["graph"] == settings.falkordb_graph_name
 
 
 def test_health_endpoint_unhealthy_when_falkordb_down():
@@ -44,7 +45,7 @@ def test_health_endpoint_unhealthy_when_falkordb_down():
             "connected": False,
             "host": "localhost",
             "port": 6379,
-            "graph": "anvaya",
+            "graph": settings.falkordb_graph_name,
             "version": None,
             "error": "Connection refused to FalkorDB on localhost:6379",
         }

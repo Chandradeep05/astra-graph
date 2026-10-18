@@ -49,7 +49,7 @@ def test_ingestion_creates_multiple_person_nodes():
     if not db.check_health()["connected"]:
         pytest.skip("FalkorDB is not connected")
 
-    graph = db.get_graph("anvaya")
+    graph = db.get_graph()
     res = graph.query("MATCH (p:Person) RETURN count(p)")
     assert res.result_set[0][0] >= 30
 
@@ -70,7 +70,7 @@ def test_contributor_commit_counts_match_raw_git():
         git_counts[c.author_email] = git_counts.get(c.author_email, 0) + 1
 
     # 2. FalkorDB query for top contributors
-    graph = db.get_graph("anvaya")
+    graph = db.get_graph()
     for email in ["tom@tomchristie.com", "gvbgduh@gmail.com", "mohammadamin.alaee@gmail.com"]:
         q = """
         MATCH (p:Person {email: $email})-[:AUTHORED]->(c:Commit)
@@ -98,7 +98,7 @@ def test_contributor_file_relationships_match_raw_git():
                 git_authors[c.author_email] = git_authors.get(c.author_email, 0) + 1
 
     # 2. FalkorDB query
-    graph = db.get_graph("anvaya")
+    graph = db.get_graph()
     q = """
     MATCH (p:Person)-[:AUTHORED]->(c:Commit)-[:TOUCHES]->(f:File {path: $target})
     RETURN p.email, count(DISTINCT c)
@@ -130,7 +130,7 @@ def test_co_changes_match_raw_git():
                     git_co_changes[p] = git_co_changes.get(p, 0) + 1
 
     # 2. FalkorDB CO_CHANGES
-    graph = db.get_graph("anvaya")
+    graph = db.get_graph()
     q = """
     MATCH (f:File {path: $target})-[cc:CO_CHANGES]-(other:File)
     RETURN other.path, cc.count
@@ -393,7 +393,7 @@ def test_cypher_injection_safety():
     assert resp.reason_code == RefusalCode.NO_PATH
 
     # Verify repository was not wiped
-    graph = db.get_graph("anvaya")
+    graph = db.get_graph()
     c_count = graph.query("MATCH (c:Commit) RETURN count(c)").result_set[0][0]
     assert c_count > 0
 

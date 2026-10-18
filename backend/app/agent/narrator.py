@@ -30,6 +30,11 @@ class TemplateNarrator:
             )
             return f"[Refusal: {code_str}] {getattr(response, 'reason', '')}"
 
+        verification = getattr(response, "verification", None)
+        if verification is not None and not getattr(verification, "verified", True):
+            reasons = "; ".join(getattr(verification, "rejection_reasons", [])) or "Evidence verification failed"
+            return f"[Refusal: {RefusalCode.LOW_EVIDENCE.value}] Evidence verification failed: {reasons}. Anvaya cannot safely recommend reviewers from unverified claims."
+
         if isinstance(response, ContextPackage):
             subj_val = response.subject_type.value if hasattr(response.subject_type, "value") else str(response.subject_type)
             lines = [

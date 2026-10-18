@@ -9,6 +9,7 @@ from app.actions.models import (
     Action,
     ActionCreate,
     ActionNotFoundError,
+    ActionPersistenceError,
     ActionStatus,
     ActionType,
     InvalidActionError,
@@ -82,10 +83,10 @@ class ActionService:
             created_at=now_iso,
         )
 
-        self._actions[action_id] = action
-
-        # Write to FalkorDB
+        # Write to FalkorDB FIRST
         self._write_action_to_graph(action)
+
+        self._actions[action_id] = action
 
         logger.info("Proposed action created: id=%s, type=%s, reviewer=%s", action.id, action.type, payload.reviewer)
         return action
@@ -115,6 +116,7 @@ class ActionService:
         """
         Transitions PROPOSED -> APPROVED.
         Enforces human approval invariant.
+        Fails closed if FalkorDB cannot persist approval status.
         """
         action = self.get_action(action_id)
 
@@ -125,12 +127,20 @@ class ActionService:
             )
 
         now_iso = datetime.now(timezone.utc).isoformat()
+        old_status = action.status
+        old_approved_at = action.approved_at
+
         action.status = ActionStatus.APPROVED
         action.approved_at = now_iso
 
-        self._actions[action_id] = action
-        self._update_action_status_in_graph(action)
+        try:
+            self._update_action_status_in_graph(action)
+        except Exception as exc:
+            action.status = old_status
+            action.approved_at = old_approved_at
+            raise
 
+        self._actions[action_id] = action
         logger.info("Action approved: id=%s", action_id)
         return action
 
@@ -145,6 +155,7 @@ class ActionService:
         Rejected actions can NEVER be executed.
         If a structured constraint is provided, persists it into FalkorDB graph memory
         linked to this action: (:Action)-[:RESULTED_IN]->(:Constraint).
+        Fails closed if FalkorDB cannot persist rejection status.
         """
         action = self.get_action(action_id)
 
@@ -155,43 +166,53 @@ class ActionService:
             )
 
         now_iso = datetime.now(timezone.utc).isoformat()
+        old_status = action.status
+        old_rejected_at = action.rejected_at
+        old_error = action.error_message
+
         action.status = ActionStatus.REJECTED
         action.rejected_at = now_iso
         if reason:
             action.error_message = f"Rejected by user: {reason}"
 
-        # If a structured constraint was submitted, persist to graph memory
-        if constraint:
-            from app.memory.models import ConstraintCreate, ConstraintType
-            from app.memory.service import MemoryService, get_memory_service
+        try:
+            # If a structured constraint was submitted, persist to graph memory
+            if constraint:
+                from app.memory.models import ConstraintCreate, ConstraintType
+                from app.memory.service import MemoryService, get_memory_service
 
-            if isinstance(constraint, dict):
-                c_payload = ConstraintCreate(
-                    type=constraint.get("type", ConstraintType.REVIEWER_UNAVAILABLE),
-                    subject=constraint.get("subject") or action.reviewer or action.arguments.get("reviewer", ""),
-                    scope=constraint.get("scope") or f"repo:{action.repo}",
-                    source_action_id=action.id,
-                )
-            elif isinstance(constraint, ConstraintCreate):
-                c_payload = constraint
-                c_payload.source_action_id = action.id
-                if not c_payload.subject:
-                    c_payload.subject = action.reviewer or action.arguments.get("reviewer", "")
-                if not c_payload.scope:
-                    c_payload.scope = f"repo:{action.repo}"
-            else:
-                c_payload = None
+                if isinstance(constraint, dict):
+                    c_payload = ConstraintCreate(
+                        type=constraint.get("type", ConstraintType.REVIEWER_UNAVAILABLE),
+                        subject=constraint.get("subject") or action.reviewer or action.arguments.get("reviewer", ""),
+                        scope=constraint.get("scope") or f"repo:{action.repo}",
+                        source_action_id=action.id,
+                    )
+                elif isinstance(constraint, ConstraintCreate):
+                    c_payload = constraint
+                    c_payload.source_action_id = action.id
+                    if not c_payload.subject:
+                        c_payload.subject = action.reviewer or action.arguments.get("reviewer", "")
+                    if not c_payload.scope:
+                        c_payload.scope = f"repo:{action.repo}"
+                else:
+                    c_payload = None
 
-            if c_payload:
-                mem_svc = self.memory_service or MemoryService(
-                    db_manager=self.db_manager,
-                    graph_name=self.graph_name,
-                )
-                mem_svc.create_constraint(c_payload)
+                if c_payload:
+                    mem_svc = self.memory_service or MemoryService(
+                        db_manager=self.db_manager,
+                        graph_name=self.graph_name,
+                    )
+                    mem_svc.create_constraint(c_payload)
+
+            self._update_action_status_in_graph(action)
+        except Exception as exc:
+            action.status = old_status
+            action.rejected_at = old_rejected_at
+            action.error_message = old_error
+            raise
 
         self._actions[action_id] = action
-        self._update_action_status_in_graph(action)
-
         logger.info("Action rejected: id=%s (has_constraint=%s)", action_id, bool(constraint))
         return action
 
@@ -199,6 +220,7 @@ class ActionService:
         """
         Transitions APPROVED -> EXECUTING -> SUCCEEDED / FAILED.
         Strict invariant: Execute without approval MUST fail.
+        Fails closed if FalkorDB cannot persist execution status or outcome.
         """
         action = self.get_action(action_id)
 
@@ -223,10 +245,15 @@ class ActionService:
                 f"Cannot execute action '{action_id}' in status '{action.status.value}'."
             )
 
-        # Transition to EXECUTING
+        # Transition to EXECUTING in graph first
+        old_status = action.status
         action.status = ActionStatus.EXECUTING
+        try:
+            self._update_action_status_in_graph(action)
+        except Exception as exc:
+            action.status = old_status
+            raise
         self._actions[action_id] = action
-        self._update_action_status_in_graph(action)
 
         outcome_id = f"out_{uuid.uuid4().hex[:12]}"
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -245,8 +272,18 @@ class ActionService:
                 executed_at=now_iso,
                 result=result,
             )
-            self._write_outcome_to_graph(action, outcome)
+            try:
+                self._write_outcome_to_graph(action, outcome)
+            except Exception as pe:
+                action.status = ActionStatus.FAILED
+                action.error_message = f"Execution completed in sandbox, but durable outcome provenance could not be persisted to FalkorDB: {pe}"
+                self._actions[action_id] = action
+                logger.error("Failed to persist successful outcome for %s: %s", action.id, pe)
+                raise ActionPersistenceError(action.error_message) from pe
+
             logger.info("Action execution succeeded: id=%s", action.id)
+        except ActionPersistenceError:
+            raise
         except Exception as exc:
             action.status = ActionStatus.FAILED
             action.executed_at = now_iso
@@ -260,7 +297,11 @@ class ActionService:
                 executed_at=now_iso,
                 result={"error": str(exc)},
             )
-            self._write_outcome_to_graph(action, outcome)
+            try:
+                self._write_outcome_to_graph(action, outcome)
+            except Exception as pe:
+                logger.error("Could not persist failed outcome to graph: %s", pe)
+                raise ActionPersistenceError(f"Could not persist failed outcome to graph: {pe}") from pe
             logger.error("Action execution failed: id=%s, err=%s", action.id, exc)
 
         self._actions[action_id] = action
@@ -337,7 +378,8 @@ class ActionService:
                     },
                 )
         except Exception as exc:
-            logger.warning("FalkorDB provenance write error: %s", exc)
+            logger.error("FalkorDB provenance write error: %s", exc)
+            raise ActionPersistenceError(f"FalkorDB provenance write error: {str(exc)}") from exc
 
     def _update_action_status_in_graph(self, action: Action) -> None:
         """Updates status and timestamp on the Action node in FalkorDB."""
@@ -361,7 +403,8 @@ class ActionService:
                 },
             )
         except Exception as exc:
-            logger.warning("FalkorDB status update error: %s", exc)
+            logger.error("FalkorDB status update error: %s", exc)
+            raise ActionPersistenceError(f"FalkorDB status update error: {str(exc)}") from exc
 
     def _write_outcome_to_graph(self, action: Action, outcome: Outcome) -> None:
         """Writes Outcome node and (:Action)-[:RESULTED_IN]->(:Outcome) link."""
@@ -394,7 +437,8 @@ class ActionService:
                 },
             )
         except Exception as exc:
-            logger.warning("FalkorDB outcome write error: %s", exc)
+            logger.error("FalkorDB outcome write error: %s", exc)
+            raise ActionPersistenceError(f"FalkorDB outcome write error: {str(exc)}") from exc
 
     def _read_action_from_graph(self, action_id: str) -> Optional[Action]:
         """Reads Action node from FalkorDB."""

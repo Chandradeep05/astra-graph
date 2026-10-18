@@ -57,17 +57,31 @@ class TemplateProvider(LLMProvider):
                 arguments={"error": "Direct Cypher execution is strictly prohibited."},
             )
 
+        is_impact_query = bool(re.search(r"\b(affect|impact|blast radius|break|touch|co-change|modifying|modify|changing|change)\b", q, re.IGNORECASE))
+        is_reviewer_query = bool(
+            re.search(
+                r"\b(review|reviewer|reviewers|who\s+should\s+review|who\s+knows|who\s+touched|who\s+has\s+worked|who\s+worked|who\s+owns|contributor|contributors|author|authors|ownership)\b",
+                q,
+                re.IGNORECASE,
+            )
+            or (re.search(r"\bwho\b", q, re.IGNORECASE) and not re.search(r"\b(what|why|how|where|when|which)\b", q, re.IGNORECASE))
+        )
+        is_context_query = bool(re.search(r"\b(context|understand|context package|overview|architecture|system context)\b", q, re.IGNORECASE))
+
+        # Check for explicit destructive / execution commands that are out of scope
+        if re.search(r"\b(delete|remove|drop|destroy|deploy|run)\b", q, re.IGNORECASE) and not is_impact_query and not is_reviewer_query:
+            return ToolCall(
+                tool="out_of_scope",
+                arguments={"query": q, "reason": "Destructive or execution commands (delete, run, deploy) are out of scope for Anvaya graph intelligence."},
+            )
+
         # Detect repo from question if databases is mentioned or path implies databases
         detected_repo = repo
         if re.search(r"\bdatabases\b", q, re.IGNORECASE) or "databases/" in q or "postgres" in q:
             detected_repo = "databases"
 
-        is_impact_query = bool(re.search(r"\b(affect|impact|blast radius|break|touch|co-change|modifying|modify|changing|change)\b", q, re.IGNORECASE))
-        is_reviewer_query = bool(re.search(r"\b(review|reviewer|reviewers|who)\b", q, re.IGNORECASE))
-        is_context_query = bool(re.search(r"\b(context|understand|context package|overview|architecture|system context)\b", q, re.IGNORECASE))
-
-        # Check for file pattern
-        file_match = re.search(r"([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9_\-]+)", q)
+        # Check for file pattern (supports dotfiles like .gitignore, .env.example, as well as paths)
+        file_match = re.search(r"(?:^|[\s\"'`])(\.?[\w\-./]*\.[a-zA-Z0-9_\-]+)(?:[\s\"'`?,!;:.]|$)", q)
         file_name = file_match.group(1).rstrip("?.!,:;") if file_match else None
 
         # Resolve shorthand postgres.py -> databases/backends/postgres.py if detected_repo is databases
@@ -91,6 +105,26 @@ class TemplateProvider(LLMProvider):
                     tool="context_package",
                     arguments={"repository": detected_repo, "subject": mod_name, "subject_type": "module"},
                 )
+
+            # Check for explicit subject request, e.g. "context for <subject>", "understand <subject>"
+            subj_match = re.search(
+                r"\b(?:context\s+(?:for|on|about|of)|understand(?:ing)?|overview\s+(?:for|of))\s+([a-zA-Z0-9_\-\./]+)\b",
+                q,
+                re.IGNORECASE,
+            )
+            if subj_match:
+                candidate = subj_match.group(1).rstrip("?.!,:;")
+                if candidate.lower() in ("arth", "databases"):
+                    return ToolCall(
+                        tool="context_package",
+                        arguments={"repository": candidate.lower(), "subject": candidate.lower(), "subject_type": "repository"},
+                    )
+                if candidate.lower() not in ("the", "this", "our", "a", "an", "all", "system", "codebase", "repository", "repo", "project"):
+                    return ToolCall(
+                        tool="context_package",
+                        arguments={"repository": detected_repo, "subject": candidate, "subject_type": "module"},
+                    )
+
             target_repo = detected_repo
             if re.search(r"\barth\b", q, re.IGNORECASE):
                 target_repo = "arth"
@@ -117,20 +151,20 @@ class TemplateProvider(LLMProvider):
                 arguments={"repo": detected_repo, "file_path": file_name},
             )
 
-        # Module pattern: e.g. "Who should review the backend module?" or "module backend"
+        # Module pattern: only with positive reviewer intent
         module_match = re.search(r"(?:the\s+)?([a-zA-Z0-9_\-\./]+)\s+module\b", q, re.IGNORECASE)
         if not module_match:
             module_match = re.search(r"\bmodule[:\s]+([a-zA-Z0-9_\-\./]+)\b", q, re.IGNORECASE)
 
-        if module_match:
+        if module_match and is_reviewer_query:
             mod_name = module_match.group(1).rstrip("?.!,:;")
             return ToolCall(
                 tool="reviewers_for",
                 arguments={"repo": detected_repo, "module": mod_name},
             )
 
-        # File pattern: e.g. "Who should review backend/app/api/v1/internal.py?" or "render.yaml"
-        if file_name:
+        # File pattern: only with positive reviewer intent
+        if file_name and is_reviewer_query:
             return ToolCall(
                 tool="reviewers_for",
                 arguments={"repo": detected_repo, "file": file_name},
@@ -145,7 +179,7 @@ class TemplateProvider(LLMProvider):
 
         return ToolCall(
             tool="out_of_scope",
-            arguments={"query": q},
+            arguments={"query": q, "reason": "No supported graph intelligence intent detected (e.g. impact, reviewer, or context package)."},
         )
 
     def narrate(self, question: str, response: Any) -> str:

@@ -83,3 +83,9 @@ class ActionNotFoundError(Exception):
 class InvalidActionError(Exception):
     """Raised when an action fails validation or has missing evidence."""
     pass
+
+
+class ActionPersistenceError(Exception):
+    """Raised when an action or outcome fails to persist to FalkorDB."""
+    pass
+

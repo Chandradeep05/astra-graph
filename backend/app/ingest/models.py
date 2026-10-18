@@ -26,6 +26,7 @@ class IngestRequest(BaseModel):
     repo_name: Optional[str] = None
     max_commits: int = 2000
     since: Optional[str] = None
+    graph_name: Optional[str] = None
 
 
 class IngestSummary(BaseModel):

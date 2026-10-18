@@ -156,13 +156,32 @@ def test_ingest_api_endpoint():
     if not db_manager.check_health()["connected"]:
         pytest.skip("FalkorDB is not reachable")
 
-    response = client.post(
-        "/api/v1/ingest",
-        json={"repo_path": repo_path, "repo_name": "arth", "max_commits": 10},
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "success"
-    assert data["summary"]["repo_name"] == "arth"
-    assert data["summary"]["commit_count"] >= 10
-    assert data["summary"]["commit_count"] > 0
+    ep_test_graph = "test_endpoint_ingest_graph"
+    client_falkor = db_manager.get_client()
+
+    try:
+        try:
+            client_falkor.select_graph(ep_test_graph).delete()
+        except Exception:
+            pass
+
+        response = client.post(
+            "/api/v1/ingest",
+            json={
+                "repo_path": repo_path,
+                "repo_name": "arth",
+                "max_commits": 10,
+                "graph_name": ep_test_graph,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["summary"]["repo_name"] == "arth"
+        assert data["summary"]["commit_count"] >= 10
+        assert data["summary"]["commit_count"] > 0
+    finally:
+        try:
+            client_falkor.select_graph(ep_test_graph).delete()
+        except Exception:
+            pass

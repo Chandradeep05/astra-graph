@@ -121,8 +121,13 @@ class AgentCoordinator:
         if isinstance(tool_result, ImpactReviewersResponse):
             narration = self.llm_adapter.narrate(message, tool_result)
 
+            is_verified = (
+                not tool_result.refused
+                and bool(tool_result.verification and tool_result.verification.verified)
+            )
+
             proposed_action: Optional[Action] = None
-            if not tool_result.refused and tool_result.candidates:
+            if not tool_result.refused and is_verified and tool_result.candidates:
                 top_cand = tool_result.candidates[0]
                 cand_ev_ids = [
                     ev.id for ev in tool_result.evidence
@@ -229,6 +234,10 @@ class AgentCoordinator:
 
         if isinstance(tool_result, ChangeImpactResponse):
             narration = self.llm_adapter.narrate(message, tool_result)
+            is_verified = (
+                not tool_result.refused
+                and bool(tool_result.verification and tool_result.verification.verified)
+            )
             impact_list = [
                 {
                     "file": f.path,
@@ -243,7 +252,7 @@ class AgentCoordinator:
                 selected_tool=tool_call.tool,
                 tool_arguments=tool_call.arguments,
                 refused=tool_result.refused,
-                verified=not tool_result.refused,
+                verified=is_verified,
                 reason_code=tool_result.reason_code,
                 reason=tool_result.reason,
                 claims=tool_result.claims,
@@ -259,8 +268,13 @@ class AgentCoordinator:
         if isinstance(tool_result, VerifiedReviewersResponse):
             narration = self.llm_adapter.narrate(message, tool_result)
 
+            is_verified = (
+                not tool_result.refused
+                and bool(tool_result.verification and tool_result.verification.verified)
+            )
+
             proposed_action: Optional[Action] = None
-            if not tool_result.refused and tool_result.candidates:
+            if not tool_result.refused and is_verified and tool_result.candidates:
                 top_cand = tool_result.candidates[0]
                 cand_ev_ids = [
                     ev.id for ev in tool_result.evidence
@@ -313,7 +327,7 @@ class AgentCoordinator:
                 selected_tool=tool_call.tool,
                 tool_arguments=tool_call.arguments,
                 refused=tool_result.refused,
-                verified=not tool_result.refused,
+                verified=is_verified,
                 reason_code=tool_result.reason_code,
                 reason=tool_result.reason,
                 claims=tool_result.claims,

@@ -242,7 +242,7 @@ def test_change_impact_arbitrary_cypher_injection_safety():
     assert resp.reason_code == RefusalCode.NO_PATH
 
     # Verify repository was not wiped
-    graph = db.get_graph("anvaya")
+    graph = db.get_graph()
     c_count = graph.query("MATCH (c:Commit) RETURN count(c)").result_set[0][0]
     assert c_count > 0
 

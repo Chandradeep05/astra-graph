@@ -196,7 +196,29 @@ def get_verified_reviewers(
         raise ValueError("Must provide either target_file or target_module")
 
     manager = db_manager or get_falkor_manager()
-    graph = manager.get_graph(graph_name)
+
+    # Pre-flight health check (FalkorDB outage / kill-switch)
+    try:
+        health = manager.check_health()
+        if not health.get("connected"):
+            return VerifiedReviewersResponse(
+                refused=True,
+                reason_code=RefusalCode.NO_PATH,
+                reason=f"FalkorDB connection unavailable: {health.get('error', 'Connection refused')}",
+                target=target,
+                target_type=target_type,
+                repo_name=repo_name,
+            )
+        graph = manager.get_graph(graph_name)
+    except Exception as exc:
+        return VerifiedReviewersResponse(
+            refused=True,
+            reason_code=RefusalCode.NO_PATH,
+            reason=f"FalkorDB connection failed: {str(exc)}",
+            target=target,
+            target_type=target_type,
+            repo_name=repo_name,
+        )
 
     # 1. Freshness check
     sync_info: Optional[Dict[str, Any]] = None
@@ -453,6 +475,23 @@ def get_verified_reviewers(
     # 6. Verify claims using the deterministic verifier
     verifier = EvidenceVerifier()
     verification = verifier.verify(claims_list, evidence_list)
+
+    if not verification.verified:
+        return VerifiedReviewersResponse(
+            refused=True,
+            reason_code=RefusalCode.LOW_EVIDENCE,
+            reason=f"Evidence verification failed: {'; '.join(verification.rejection_reasons)}",
+            target=target,
+            target_type=target_type,
+            repo_name=repo_name,
+            candidates=[],
+            excluded_candidates=excluded_candidates,
+            claims=claims_list,
+            evidence=evidence_list + memory_evidence,
+            memory_evidence=memory_evidence,
+            verification=verification,
+            sync_info=base_response.sync_info or sync_info,
+        )
 
     return VerifiedReviewersResponse(
         refused=False,

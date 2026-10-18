@@ -574,6 +574,23 @@ class ContextPackageService:
 
         # 9. Verification
         verification = self.verifier.verify(claims, evidence)
+        if not verification.verified:
+            return ContextPackage(
+                repository=repo_name,
+                subject=repo_name,
+                subject_type=SubjectType.REPOSITORY,
+                freshness=freshness,
+                summary=f"[Refusal: LOW_EVIDENCE] Context verification failed: {'; '.join(verification.rejection_reasons)}",
+                architecture=architecture,
+                historical_context=historical_context,
+                evidence=evidence,
+                claims=claims,
+                verification=verification,
+                refusal=True,
+                reason_code=RefusalCode.LOW_EVIDENCE,
+                reason=f"Evidence verification failed: {'; '.join(verification.rejection_reasons)}",
+                depth=depth,
+            )
 
         # 10. Summary
         contrib_summary = ", ".join(f"{c.name} ({c.commit_count} commits)" for c in contributors[:3])
@@ -920,6 +937,23 @@ class ContextPackageService:
 
         # 7. Verification
         verification = self.verifier.verify(claims, evidence)
+        if not verification.verified:
+            return ContextPackage(
+                repository=repo_name,
+                subject=target,
+                subject_type=SubjectType.FILE,
+                freshness=freshness,
+                summary=f"[Refusal: LOW_EVIDENCE] Context verification failed: {'; '.join(verification.rejection_reasons)}",
+                architecture=architecture,
+                historical_context=historical_context,
+                evidence=evidence,
+                claims=claims,
+                verification=verification,
+                refusal=True,
+                reason_code=RefusalCode.LOW_EVIDENCE,
+                reason=f"Evidence verification failed: {'; '.join(verification.rejection_reasons)}",
+                depth=depth,
+            )
 
         # 8. Summary
         top_auth_name = contributors[0].name if contributors else "Unknown"
@@ -1121,6 +1155,23 @@ class ContextPackageService:
                     )
 
         verification = self.verifier.verify(claims, evidence)
+        if not verification.verified:
+            return ContextPackage(
+                repository=repo_name,
+                subject=target_module,
+                subject_type=SubjectType.MODULE,
+                freshness=freshness,
+                summary=f"[Refusal: LOW_EVIDENCE] Context verification failed: {'; '.join(verification.rejection_reasons)}",
+                architecture=architecture,
+                historical_context=historical,
+                evidence=evidence,
+                claims=claims,
+                verification=verification,
+                refusal=True,
+                reason_code=RefusalCode.LOW_EVIDENCE,
+                reason=f"Evidence verification failed: {'; '.join(verification.rejection_reasons)}",
+                depth=depth,
+            )
         summary = f"Module '{target_module}' context package ({len(files)} files, {len(contributors)} contributors)."
 
         return ContextPackage(

@@ -339,6 +339,25 @@ def impact_reviewers(
     verifier = EvidenceVerifier()
     verification = verifier.verify(claims, evidence_list)
 
+    if not verification.verified:
+        return ImpactReviewersResponse(
+            refused=True,
+            reason_code=RefusalCode.LOW_EVIDENCE,
+            reason=f"Evidence verification failed: {'; '.join(verification.rejection_reasons)}",
+            target_file=target,
+            repo_name=repo_name,
+            impacted_files_count=len(co_change_paths),
+            candidates=[],
+            excluded_candidates=excluded_candidates,
+            impacted_files=impact_res.impacted_files,
+            signals=[f"Evidence verification failed for candidate claims: {'; '.join(verification.rejection_reasons)}"],
+            claims=claims,
+            evidence=evidence_list,
+            memory_evidence=memory_evidence,
+            verification=verification,
+            sync_info=impact_res.sync_info,
+        )
+
     return ImpactReviewersResponse(
         refused=False,
         target_file=target,

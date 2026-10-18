@@ -29,8 +29,8 @@ class ReviewersToolInput(BaseModel):
     file: Optional[str] = Field(default=None, description="Path to target file")
     module: Optional[str] = Field(default=None, description="Path to target module")
     exclude_emails: Optional[List[str]] = Field(default=None, description="Contributor emails to exclude")
-    limit: int = Field(default=10, description="Maximum candidate reviewers to return")
-    max_evidence: int = Field(default=20, description="Maximum evidence commits to return")
+    limit: int = Field(default=10, ge=1, le=50, description="Maximum candidate reviewers to return")
+    max_evidence: int = Field(default=20, ge=1, le=100, description="Maximum evidence commits to return")
 
     @model_validator(mode="before")
     @classmethod
@@ -137,8 +137,8 @@ class ChangeImpactToolInput(BaseModel):
     file_path: Optional[str] = Field(default=None, description="Path to target file")
     file: Optional[str] = Field(default=None, description="Path to target file (alias)")
     repo: str = Field(default="arth", description="Target repository name")
-    limit: int = Field(default=10, description="Maximum impacted files to return")
-    max_evidence: int = Field(default=30, description="Maximum evidence commit records to return")
+    limit: int = Field(default=10, ge=1, le=50, description="Maximum impacted files to return")
+    max_evidence: int = Field(default=30, ge=1, le=100, description="Maximum evidence commit records to return")
 
     @model_validator(mode="before")
     @classmethod
@@ -204,8 +204,8 @@ class ImpactReviewersToolInput(BaseModel):
     file_path: Optional[str] = Field(default=None, description="Path to target file")
     file: Optional[str] = Field(default=None, description="Path to target file (alias)")
     repo: str = Field(default="databases", description="Target repository name")
-    limit: int = Field(default=5, description="Maximum reviewer candidates to return")
-    max_evidence: int = Field(default=30, description="Maximum evidence commit records to return")
+    limit: int = Field(default=5, ge=1, le=50, description="Maximum reviewer candidates to return")
+    max_evidence: int = Field(default=30, ge=1, le=100, description="Maximum evidence commit records to return")
 
     @model_validator(mode="before")
     @classmethod

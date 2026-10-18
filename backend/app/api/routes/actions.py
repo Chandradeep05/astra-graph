@@ -6,6 +6,7 @@ from app.actions.models import (
     Action,
     ActionCreate,
     ActionNotFoundError,
+    ActionPersistenceError,
     ActionStatus,
     InvalidActionError,
     InvalidStateTransitionError,
@@ -32,6 +33,11 @@ def propose_action(
     except InvalidActionError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except ActionPersistenceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         )
 
@@ -82,6 +88,11 @@ def approve_action(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+    except ActionPersistenceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
 
 
 @router.post("/{action_id}/reject", response_model=Action)
@@ -108,6 +119,11 @@ def reject_action(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+    except ActionPersistenceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
 
 
 @router.post("/{action_id}/execute", response_model=Action)
@@ -129,5 +145,10 @@ def execute_action(
     except InvalidStateTransitionError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except ActionPersistenceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         )
