@@ -2,7 +2,7 @@
 
 > Sanskrit: *connection, lineage* — Engineering Knowledge Graph & Evidence-Backed Agent on **FalkorDB**.
 
-Anvaya constructs a real-time graph of repository lineage directly from Git history and GitHub interactions, unlocking deterministic multi-hop reasoning: who knows code, change risk, why changes occurred, and who should review pull requests.
+Anvaya constructs an operational knowledge graph of repository lineage directly from Git history, unlocking deterministic multi-hop reasoning: who knows code, change risk, why changes occurred, who should review pull requests, and human-approved action lifecycles.
 
 ---
 
@@ -39,10 +39,10 @@ Fresh Session → Changed Future Recommendation
 
 FalkorDB is the foundational, indispensable operational core of Anvaya:
 
-1. **Ultra-Fast Graph Traversals**: Sub-millisecond multi-hop graph queries across commits, author lineages, and co-change clusters on Redis infrastructure.
-2. **Deterministic Truth Layer**: All facts, commit counts, line additions, and blast-radius coupling metrics are computed directly by FalkorDB Cypher queries—never guessed or synthesized by an LLM.
+1. **Fast Graph Traversals**: Single-digit to tens-of-milliseconds graph queries (typically 9.8 ms – 65 ms on local benchmarks) across commits, author lineages, and co-change clusters.
+2. **Deterministic Truth Layer**: All facts, commit counts, line churn metrics, and blast-radius coupling are computed directly by FalkorDB Cypher queries. LLMs do not author evidence-backed factual claims; deterministic graph queries and verification establish the factual basis.
 3. **Persistent Engineering Memory**: Organizational constraints (e.g. reviewer unavailability) and action provenance (`:Action -> :Outcome`) are stored directly as graph nodes, surviving application restarts and fresh agent sessions.
-4. **Fail-Closed Trust Contract**: If FalkorDB is offline or unreachable, Anvaya fails closed immediately with `refusal=True` and `reason_code=NO_PATH`. It never falls back to ungrounded LLMs or hallucinated context.
+4. **Fail-Closed Trust Contract**: If FalkorDB is offline or unreachable, Anvaya fails closed immediately with `refusal=True` and `reason_code=NO_PATH`. When graph evidence is unavailable, Anvaya refuses rather than generating an unsupported answer.
 
 ---
 
@@ -210,9 +210,9 @@ Trust requires knowing when to refuse rather than hallucinating:
 ## ARTH Example
 
 - **Repository**: `chandradeep05/ARTH` (Personal trading assistant).
-- **Graph Scale**: 213 files, 6 modules (`backend`, `frontend`, `alembic`, `docs`, `.github`, `.`), 10 historical sync commits.
+- **Graph Scale**: 97 commits (HEAD: `79595add24d7e561d28be4fe66af3fa2c17b933d`), 213 historical files, 771 file touches, 49,170 additions, 8,381 deletions, 8,118 directed `CO_CHANGES` edges across 6 modules (`backend`, `frontend`, `alembic`, `docs`, `.github`, `.`).
 - **Target File**: `backend/app/engines/assistant/engine.py`
-  - Authored primarily by `chandradeep05` (21 commits touching file).
+  - Authored by `chandradeep05` (21 commits touching file).
   - Blast Radius: 19 historical co-changing files across `backend` and `.` modules.
   - Context Package: Complete architectural breakdown with 100% verified claims and zero rejected claims.
 
@@ -237,6 +237,7 @@ Trust requires knowing when to refuse rather than hallucinating:
 ### 1. Prerequisites
 - Docker & Docker Compose
 - Python 3.9+
+- Git
 
 ### 2. Start FalkorDB
 ```bash
@@ -256,12 +257,29 @@ source venv/bin/activate
 pip install -r backend/requirements.txt
 ```
 
-### 4. Run Verification Test Suite
+### 4. Obtain Sample Repositories (Public Benchmark Data)
+Anvaya evaluates on two public open-source repositories (cloned into `data/repos/`, which is gitignored):
+```bash
+# Windows PowerShell / Bash:
+mkdir -p data/repos
+git clone https://github.com/Chandradeep05/ARTH.git data/repos/arth
+git clone https://github.com/encode/databases.git data/repos/databases
+```
+
+### 5. Ingest Repositories into FalkorDB
+Populate the canonical `anvaya` production graph using the provided ingestion script:
+```bash
+python scripts/ingest_sample_data.py
+```
+*(Alternatively, you can trigger ingestion via the FastAPI endpoint once the server is started: `POST /api/v1/ingest` with `{"repo_path": "data/repos/arth", "repo_name": "arth"}`.)*
+
+### 6. Run Verification Test Suite
+Execute the full automated test suite (runs in complete isolation against `anvaya_test` without mutating the canonical `anvaya` production graph):
 ```bash
 pytest backend/tests -v
 ```
 
-### 5. Launch the Application
+### 7. Launch the Application
 ```bash
 uvicorn app.main:app --app-dir backend --reload --port 8000
 ```
@@ -271,7 +289,7 @@ Open **`http://localhost:8000/`** in your browser to access the Anvaya engineeri
 
 ## Test Results
 
-Anvaya maintains a comprehensive, deterministic test suite covering every milestone:
+Anvaya maintains a comprehensive, deterministic test suite covering every milestone and audit remediation:
 
 - `test_health.py`: FalkorDB connection, ping, and health check.
 - `test_ingest.py`: Git-only ingestion pipeline, commit touches, and file containment.
@@ -285,26 +303,32 @@ Anvaya maintains a comprehensive, deterministic test suite covering every milest
 - `test_golden_workflow.py`: End-to-end Investigate -> Explain -> Propose -> Act lifecycle.
 - `test_context_package.py`: Bounded repository, file, and module context packages.
 - `test_m12_frontend_integration.py`: Web UI serving, Cytoscape graph exploration, evidence path tracing, and memory reset.
+- `test_repo_isolation.py`: Cross-repository graph isolation and repository-scoped file identity.
+- `test_audit2r_remediation.py`: Trust boundary enforcement, action graph provenance, and fail-closed gates.
+- `test_audit3r_remediation.py`: Test graph isolation (`anvaya_test`), dotfile extraction, and context routing.
 
 ```text
 ============================= test session starts =============================
 platform win32 -- Python 3.9.7, pytest-8.4.2
-collected 143 items
+collected 171 items
 
-backend/tests/test_actions.py .............                             [  9%]
-backend/tests/test_agent.py .........                                   [ 15%]
-backend/tests/test_context_package.py ....................              [ 29%]
-backend/tests/test_evidence_verifier.py ..........                      [ 36%]
-backend/tests/test_golden_workflow.py .......                            [ 41%]
-backend/tests/test_health.py ....                                       [ 44%]
-backend/tests/test_impact.py .................                          [ 55%]
-backend/tests/test_ingest.py .......                                    [ 60%]
-backend/tests/test_m12_frontend_integration.py ....................     [ 74%]
-backend/tests/test_memory.py .............                              [ 83%]
-backend/tests/test_multi_contributor.py ................                [ 95%]
+backend/tests/test_actions.py .............                             [  7%]
+backend/tests/test_agent.py .............                               [ 15%]
+backend/tests/test_audit2r_remediation.py ............                  [ 22%]
+backend/tests/test_audit3r_remediation.py .........                     [ 27%]
+backend/tests/test_context_package.py ....................              [ 39%]
+backend/tests/test_evidence_verifier.py ............                    [ 46%]
+backend/tests/test_golden_workflow.py ..........                        [ 52%]
+backend/tests/test_health.py ...                                        [ 53%]
+backend/tests/test_impact.py ...............                            [ 62%]
+backend/tests/test_ingest.py .....                                      [ 65%]
+backend/tests/test_m12_frontend_integration.py ....................     [ 77%]
+backend/tests/test_memory.py ........                                   [ 81%]
+backend/tests/test_multi_contributor.py .................               [ 91%]
+backend/tests/test_repo_isolation.py .......                            [ 95%]
 backend/tests/test_reviewers.py .......                                 [100%]
 
-============================ 143 passed in 27.38s ============================
+============================ 171 passed in 33.02s ============================
 ```
 
 ---
@@ -314,3 +338,5 @@ backend/tests/test_reviewers.py .......                                 [100%]
 - **Git-Only Lineage**: Architecture and coupling are derived strictly from Git directory trees, commit touches, and historical co-change co-occurrence. Dynamic runtime microservice calls, reflection, and network topologies are not modeled.
 - **Historical Probability**: Blast-radius co-changes reflect statistical commit coupling, not abstract syntax tree (AST) execution paths.
 - **Bounded Window**: Historical depth is intentionally bounded to avoid graph explosion on very large enterprise monorepos.
+- **Sandbox Action Execution**: Review request actions are executed and provenanced in FalkorDB within a simulated sandbox environment (`sandbox: true`); live automated mutation of external GitHub pull-request review assignments is intentionally decoupled to ensure human oversight.
+- **Local Benchmark Measurements**: Graph query latencies (typically 9.8 ms – 65 ms on local benchmarks) reflect local FalkorDB execution. In our local benchmark, graph-backed reviewer retrieval (`reviewers_for`) completed in **9.83 ms** (approx. 34× faster than parsing raw Git history at **333.61 ms**). Latencies vary by repository size, traversal depth, and host hardware.
