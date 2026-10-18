@@ -3,6 +3,27 @@ let cy = null;
 let currentAction = null;
 let lastAskResponse = null;
 
+// Dynamic API Base URL resolution:
+// 1. window.__ANVAYA_API_BASE__ if explicitly defined
+// 2. <meta name="anvaya-api-base" content="..."> if present
+// 3. Defaults to "" (relative URL, optimal for same-origin and Vercel rewrites)
+function getApiBase() {
+  if (typeof window !== "undefined" && window.__ANVAYA_API_BASE__) {
+    return window.__ANVAYA_API_BASE__.replace(/\/+$/, "");
+  }
+  const meta = typeof document !== "undefined" ? document.querySelector('meta[name="anvaya-api-base"]') : null;
+  if (meta && meta.content && !meta.content.startsWith("__") && meta.content.trim()) {
+    return meta.content.trim().replace(/\/+$/, "");
+  }
+  return "";
+}
+
+function apiUrl(endpoint) {
+  const base = getApiBase();
+  const path = endpoint.startsWith("/") ? endpoint : "/" + endpoint;
+  return base ? `${base}${path}` : path;
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   initHealthCheck();
   initTabs();
@@ -22,14 +43,15 @@ async function initHealthCheck() {
 
   async function check() {
     try {
-      const res = await fetch("/health");
+      const res = await fetch(apiUrl("/health"));
       const data = await res.json();
       if (res.ok && data.status === "healthy" && data.falkordb?.connected) {
         dot.className = "status-dot";
         text.textContent = `FalkorDB: Connected (${data.falkordb.graph})`;
       } else {
         dot.className = "status-dot offline";
-        text.textContent = `FalkorDB: Unavailable (Fail-Closed)`;
+        const cat = data.error_category || (data.falkordb && data.falkordb.error_category) || "Fail-Closed";
+        text.textContent = `FalkorDB: Unavailable (${cat})`;
       }
     } catch {
       dot.className = "status-dot offline";
@@ -101,7 +123,7 @@ function initAskScreen() {
     results.style.display = "none";
 
     try {
-      const res = await fetch("/api/v1/ask", {
+      const res = await fetch(apiUrl("/api/v1/ask"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message, repo }),
@@ -268,7 +290,7 @@ async function fetchEvidencePath(targetFile, reviewerName, repo) {
 
   try {
     const res = await fetch(
-      `/api/v1/graph/evidence-path?target_file=${encodeURIComponent(targetFile)}&reviewer_name=${encodeURIComponent(reviewerName)}&repo=${encodeURIComponent(repo)}`
+      apiUrl(`/api/v1/graph/evidence-path?target_file=${encodeURIComponent(targetFile)}&reviewer_name=${encodeURIComponent(reviewerName)}&repo=${encodeURIComponent(repo)}`)
     );
     const data = await res.json();
 
@@ -322,7 +344,7 @@ async function handleApproveAction() {
 
   try {
     // 1. Approve
-    const appRes = await fetch(`/api/v1/actions/${actionId}/approve`, { method: "POST" });
+    const appRes = await fetch(apiUrl(`/api/v1/actions/${actionId}/approve`), { method: "POST" });
     const appData = await appRes.json();
     if (!appRes.ok) throw new Error(appData.detail || "Approval failed");
 
@@ -330,7 +352,7 @@ async function handleApproveAction() {
     document.getElementById("action-status-badge").textContent = "APPROVED";
 
     // 2. Execute
-    const exeRes = await fetch(`/api/v1/actions/${actionId}/execute`, { method: "POST" });
+    const exeRes = await fetch(apiUrl(`/api/v1/actions/${actionId}/execute`), { method: "POST" });
     const exeData = await exeRes.json();
     if (!exeRes.ok) throw new Error(exeData.detail || "Execution failed");
 
@@ -367,7 +389,7 @@ async function handleRejectAction() {
       },
     };
 
-    const res = await fetch(`/api/v1/actions/${actionId}/reject`, {
+    const res = await fetch(apiUrl(`/api/v1/actions/${actionId}/reject`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -420,7 +442,7 @@ async function renderGraph() {
   if (subject) url += `&subject=${encodeURIComponent(subject)}`;
 
   try {
-    const res = await fetch(url);
+    const res = await fetch(apiUrl(url));
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "Graph fetch failed");
 
@@ -661,7 +683,7 @@ async function fetchContext() {
   const subject = document.getElementById("ctx-subject-input").value.trim() || null;
 
   try {
-    const res = await fetch("/api/v1/context", {
+    const res = await fetch(apiUrl("/api/v1/context"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ repository: repo, subject, depth: 3, max_files: 15 }),
@@ -771,7 +793,7 @@ function initMemoryDemo() {
   btnS1.addEventListener("click", async () => {
     const out = document.getElementById("demo-s1-output");
     out.textContent = "Querying FalkorDB (Session 1)...";
-    const res = await fetch("/api/v1/ask", {
+    const res = await fetch(apiUrl("/api/v1/ask"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -792,12 +814,12 @@ function initMemoryDemo() {
     const out = document.getElementById("demo-constraint-output");
     out.textContent = "Writing constraint to FalkorDB...";
     // Query last proposed action to reject it, or simulate direct rejection
-    const actRes = await fetch("/api/v1/actions?repo=databases&status=proposed");
+    const actRes = await fetch(apiUrl("/api/v1/actions?repo=databases&status=proposed"));
     const actions = await actRes.json();
     const targetAction = actions[0];
 
     if (targetAction) {
-      await fetch(`/api/v1/actions/${targetAction.id}/reject`, {
+      await fetch(apiUrl(`/api/v1/actions/${targetAction.id}/reject`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -819,7 +841,7 @@ function initMemoryDemo() {
   btnS2.addEventListener("click", async () => {
     const out = document.getElementById("demo-s2-output");
     out.textContent = "Querying FalkorDB in Fresh Session 2...";
-    const res = await fetch("/api/v1/ask", {
+    const res = await fetch(apiUrl("/api/v1/ask"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -845,7 +867,7 @@ function initMemoryDemo() {
 async function refreshMemoryTable() {
   const tbody = document.getElementById("memory-constraints-tbody");
   try {
-    const res = await fetch("/api/v1/graph/memory?repo=databases");
+    const res = await fetch(apiUrl("/api/v1/graph/memory?repo=databases"));
     const data = await res.json();
     tbody.innerHTML = "";
 
@@ -876,7 +898,7 @@ function initResetButton() {
   const btn = document.getElementById("btn-reset-demo");
   btn.addEventListener("click", async () => {
     try {
-      const res = await fetch("/api/v1/graph/memory/reset-demo?repo=databases", { method: "POST" });
+      const res = await fetch(apiUrl("/api/v1/graph/memory/reset-demo?repo=databases"), { method: "POST" });
       const data = await res.json();
       alert(data.message || "Demo state reset successfully.");
       refreshMemoryTable();

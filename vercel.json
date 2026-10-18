@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/health",
+      "destination": "https://anvaya-backend.onrender.com/health"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://anvaya-backend.onrender.com/api/:path*"
+    },
+    {
+      "source": "/static/:path*",
+      "destination": "/backend/app/static/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/backend/app/static/$1"
+    }
+  ]
+}
